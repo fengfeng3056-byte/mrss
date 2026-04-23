@@ -3,12 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>丧尸割草 Demo - 绝对铁壁防守版</title>
+    <title>丧尸割草 Demo - 资源预加载版</title>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; display: flex; justify-content: center; align-items: center; touch-action: none; font-family: sans-serif; user-select: none; }
         #game-container { position: relative; width: auto; height: 100vh; aspect-ratio: 1080 / 1920; background-color: #1a1a1a; overflow: hidden; box-shadow: 0 0 30px rgba(255, 255, 255, 0.1); }
         canvas { display: block; width: 100%; height: 100%; }
         
+        /* 【新增】：加载界面全屏遮罩 */
+        #loading-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: #0a0a0a; z-index: 9999;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            transition: opacity 0.8s ease;
+        }
+        #loading-text {
+            color: #00ffcc; font-size: 32px; font-weight: bold; margin-bottom: 20px;
+            text-shadow: 0 0 15px rgba(0, 255, 204, 0.5); letter-spacing: 2px;
+        }
+        #loading-bar-container {
+            width: 70%; height: 24px; background: #222; border: 3px solid #444; 
+            border-radius: 12px; overflow: hidden; box-shadow: inset 0 0 10px #000;
+        }
+        #loading-progress {
+            width: 0%; height: 100%; 
+            background: linear-gradient(90deg, #ff0055, #00ffaa); 
+            transition: width 0.1s ease;
+            box-shadow: 0 0 20px rgba(0, 255, 170, 0.6);
+        }
+
         #center-alert {
             position: absolute; top: 15%; left: 50%; transform: translateX(-50%);
             color: #ff0055; font-size: 32px; font-weight: bold; text-shadow: 2px 2px 5px black, 0 0 20px #ff0055;
@@ -19,7 +41,7 @@
         #hud-top {
             position: absolute; top: 20px; left: 20px; right: 20px;
             display: flex; justify-content: space-between; align-items: flex-start;
-            z-index: 10; pointer-events: none; transition: opacity 0.5s;
+            z-index: 10; pointer-events: none; transition: opacity 0.5s; opacity: 0; /* 默认隐藏，加载后显示 */
         }
         #player-profile {
             display: flex; align-items: center; background: rgba(0, 0, 0, 0.6);
@@ -60,6 +82,13 @@
 </head>
 <body>
     <div id="game-container">
+        <div id="loading-screen">
+            <div id="loading-text">资源加载中 0%</div>
+            <div id="loading-bar-container">
+                <div id="loading-progress"></div>
+            </div>
+        </div>
+
         <div id="center-alert"></div>
         <div id="hud-top">
             <div id="player-profile">
@@ -80,14 +109,14 @@
 
 <script>
 /** ==========================================
- * 0. 游戏全局配置
+ * 0. 游戏全局配置 
  * ========================================== */
 const GameConfig = {
     tower2: { offsetX: 300, offsetY: -150 },
     walls: {
         segmentLen: 115,            
         wall2StartOffset: { x: -10, y: 70 }, 
-        wall3StartOffset: { x: 110, y: 20 },   
+        wall3StartOffset: { x: 70, y: 20 },   
         stepOffset: { x: 55, y: -45 }        
     }
 };
@@ -111,28 +140,20 @@ const PART_TYPES = {
     debris:{ colRadius: 0,  colOffsetY: 0 }  
 };
 
-const ASSETS = {
-    player_idle: new Image(), player_move: new Image(), player_shoot: new Image(), player_move_shoot: new Image(),
-    npc_run: new Image(), npc_fall: new Image(), npc_dead: new Image(),
-    tower_broken: new Image(), tower_active: new Image(),
-    zombie1: new Image(), zombie2: new Image(), boss: new Image(), bullet: new Image(), bg: new Image(),
-    res_wood: new Image(), res_iron: new Image(), res_screw: new Image(),
-    wall1: new Image(), wall2: new Image(),
-    tree1: new Image(), tree2: new Image(), tree3: new Image(), tree4: new Image(),
-    bush1: new Image(), bush2: new Image(), grass: new Image(),
-    stone1: new Image(), stone2: new Image(), stone3: new Image(),
-    car1: new Image(), car2: new Image(), car3: new Image(),
-    house1: new Image(), house2: new Image(), debris: new Image()
+// 【核心修改】：资源预加载引擎准备
+const ASSETS = {};
+const assetPaths = {
+    player_idle: './player_idle.png', player_move: './player_move.png',
+    player_shoot: './player_shoot.png', player_move_shoot: './player_move_shoot.png',
+    npc_run: './npc_run.png', npc_fall: './npc_fall.png', npc_dead: './npc_dead.png',
+    tower_broken: './tower_broken.png', tower_active: './tower_active.png',
+    zombie1: './zombie1.png', zombie2: './zombie2.png', boss: './boss.png',
+    bullet: './bullet.png', bg: './bg.png',
+    res_wood: './res_wood.png', res_iron: './res_iron.png', res_screw: './res_screw.png',
+    wall1: './wall1.png', wall2: './wall2.png'
 };
-ASSETS.player_idle.src = './player_idle.png'; ASSETS.player_move.src = './player_move.png';
-ASSETS.player_shoot.src = './player_shoot.png'; ASSETS.player_move_shoot.src = './player_move_shoot.png';
-ASSETS.npc_run.src = './npc_run.png'; ASSETS.npc_fall.src = './npc_fall.png'; ASSETS.npc_dead.src = './npc_dead.png'; 
-ASSETS.tower_broken.src = './tower_broken.png'; ASSETS.tower_active.src = './tower_active.png'; 
-ASSETS.zombie1.src = './zombie1.png'; ASSETS.zombie2.src = './zombie2.png'; ASSETS.boss.src = './boss.png';
-ASSETS.bullet.src = './bullet.png'; ASSETS.bg.src = './bg.png';
-ASSETS.res_wood.src = './res_wood.png'; ASSETS.res_iron.src = './res_iron.png'; ASSETS.res_screw.src = './res_screw.png';
-ASSETS.wall1.src = './wall1.png'; ASSETS.wall2.src = './wall2.png'; 
-for(let key in PART_TYPES) { ASSETS[key].src = `./${key}.png`; }
+// 自动注入场景部件路径
+for(let key in PART_TYPES) { assetPaths[key] = `./${key}.png`; }
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -274,6 +295,7 @@ class Resource {
         let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
 
+        let resName = this.type === 'wood' ? '破木材' : (this.type === 'iron' ? '旧铁皮' : '螺丝钉');
         let img = ASSETS['res_' + this.type];
         ctx.save(); ctx.shadowColor = '#fffacd'; ctx.shadowBlur = 4;
         if (img.complete && img.naturalWidth !== 0) {
@@ -479,10 +501,7 @@ class Tower {
 
 class NPC {
     constructor(x, y, isMale) {
-        this.x = x; this.y = y; 
-        this.hp = 10;  // 【修改：降低血量，使其在开局被丧尸秒杀】
-        this.speed = 1.5; // 【修改：降低移速，确保被丧尸追上】
-        this.color = isMale ? '#ffaa00' : '#00ddff'; this.size = 40;
+        this.x = x; this.y = y; this.hp = 10; this.speed = 1.5; this.color = isMale ? '#ffaa00' : '#00ddff'; this.size = 40;
         this.state = 'run'; this.frameX = 0; this.frameTimer = 0; this.frameInterval = 120; 
         this.spriteWidth = 128; this.spriteHeight = 128; this.framesConfig = { 'run': 4, 'fall': 4 };
     }
@@ -621,8 +640,10 @@ class Zombie {
             if (distToTarget < this.size + tSize && time - this.lastAttackTime > this.attackInterval) {
                 let dmg = Math.floor(Math.random() * (this.maxDmg - this.minDmg + 1)) + this.minDmg; 
                 targetEntity.hp -= dmg; this.lastAttackTime = time;
-                // 受击红色白边
                 addDamageText(targetEntity.x, targetEntity.y - 80, `-${dmg}`, '#ff0000', '#ffffff');
+                if (targetEntity !== player && targetEntity.hp <= 0) { 
+                    addDamageText(targetEntity.x, targetEntity.y, `啊啊啊...`, '#ff0000', '#ffffff');
+                }
             }
         }
     }
@@ -657,7 +678,7 @@ class Bullet {
         for (let z of zombies) {
             if (Math.hypot(z.x - this.x, z.y - this.y) < z.size + 20) {
                 z.hp -= this.damage; z.x += this.vx * (z.type === 'boss' ? 0.1 : 0.8); z.y += this.vy * (z.type === 'boss' ? 0.1 : 0.8);
-                // 【角色攻击】：橘黄棕边
+                // 【橘黄色 + 深棕色描边】
                 addDamageText(z.x, z.y - z.size - 20, `-${this.damage}`, '#ffa500', '#5c4033');
                 this.life = 0; break;
             }
@@ -715,7 +736,7 @@ function handleStart(e) {
                     let pB = { x: tower2.x + ux * 3 * cfg.segmentLen, y: tower2.y + uy * 3 * cfg.segmentLen };
                     for(let i=1; i<=3; i++) { walls.push(new WallSegment(tower2.x + ux * i * cfg.segmentLen, tower2.y + uy * i * cfg.segmentLen, false)); }
 
-                    // 【缝隙修补补丁】：在塔基与墙体之间，以及偏移拐角处追加承重墙，彻底焊死防线
+                    // 补缝墙
                     walls.push(new WallSegment(tower.x - ux * 0.6 * cfg.segmentLen, tower.y - uy * 0.6 * cfg.segmentLen, false)); 
                     walls.push(new WallSegment(tower2.x + ux * 0.6 * cfg.segmentLen, tower2.y + uy * 0.6 * cfg.segmentLen, false));
                     walls.push(new WallSegment(pA.x + cfg.wall2StartOffset.x * 0.5, pA.y + cfg.wall2StartOffset.y * 0.5, true));
@@ -746,7 +767,7 @@ function handleStart(e) {
 
                     siegeStarted = true;
                     siegeStartTime = performance.now(); 
-                    showCenterAlert("🚨 丧尸围城！突击丧尸正从西北方逼近！撤回基地防守！", "#ff0000", 8000);
+                    showCenterAlert("🚨 丧尸围城！突击丧尸正从西北方逼近！撤回阵地防守！", "#ff0000", 8000);
 
                     let spawnOriginX = tower.x - 1500;
                     let spawnOriginY = tower.y - 1500;
@@ -830,16 +851,16 @@ function initGame() {
     siegeStarted = false; siegeStartTime = 0; bossSpawnedInSiege = false; hordeStartTime = Infinity; 
     
     fogSet.clear(); walls = []; sceneParts = []; wallBuildPoint = null; resources = []; zombies = []; bullets = []; damageTexts = [];
-    let hud = document.getElementById('hud-top'); if(hud) hud.style.opacity = '0'; 
+    
+    // UI重置
+    let hud = document.getElementById('hud-top'); if(hud) hud.style.opacity = '1'; // 直接显示UI
 
     gunDrop = { x: player.x, y: player.y + 900 }; 
     tower = new Tower(player.x - 250, player.y + 1200, "1号防线"); 
 
     generateScene(); 
 
-    // NPC 会向下方跑动
-    npcs.push(new NPC(player.x - 80, player.y - 80, true)); 
-    npcs.push(new NPC(player.x + 80, player.y - 120, false));
+    npcs.push(new NPC(player.x - 80, player.y - 80, true)); npcs.push(new NPC(player.x + 80, player.y - 120, false));
     
     for (let i = 0; i < 8; i++) {
         let z = new Zombie(player.x + (Math.random()*250 - 125), player.y - 180 - Math.random()*40, 'normal1');
@@ -902,7 +923,6 @@ function gameLoop(time) {
 
         if (gunDrop && Math.hypot(player.x - gunDrop.x, player.y - gunDrop.y) < 60) {
             gunDrop = null; player.hasGun = true; gameState = 'tutorial'; joystick.active = false; joystick.vectorX = 0; joystick.vectorY = 0;
-            let hud = document.getElementById('hud-top'); if(hud) hud.style.opacity = '1'; 
         }
         zombies.forEach(z => z.update(dt, time, targets));
     }
@@ -961,8 +981,7 @@ function gameLoop(time) {
             if (dist < res.pickupRadius + 40 && player.hp > 0) {
                 player.inventory[res.type] += 3; totalResourcesCollected++;
                 if (tutorialPhase === 'gather_walls') wallResourcesCollected++; 
-                addDamageText(res.x, res.y - 40, "+3", '#ffcc00', null);
-                resources.splice(i, 1);
+                addDamageText(res.x, res.y - 40, "+3", '#ffcc00', null); resources.splice(i, 1);
             }
         }
         
@@ -1194,7 +1213,44 @@ function gameLoop(time) {
     requestAnimationFrame(gameLoop);
 }
 
-initGame(); requestAnimationFrame(gameLoop);
+/** ==========================================
+ * 资源预加载引擎引擎
+ * ========================================== */
+let totalAssets = Object.keys(assetPaths).length;
+let loadedAssets = 0;
+
+function checkLoadComplete() {
+    loadedAssets++;
+    let progress = Math.floor((loadedAssets / totalAssets) * 100);
+    
+    let textEl = document.getElementById('loading-text');
+    let barEl = document.getElementById('loading-progress');
+    
+    if (textEl) textEl.innerText = `资源加载中 ${progress}%`;
+    if (barEl) barEl.style.width = `${progress}%`;
+    
+    // 当所有资源加载完成（即使部分加载失败也会触发，保证游戏能进去）
+    if (loadedAssets >= totalAssets) {
+        let loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
+            loadingScreen.style.opacity = '0';
+            setTimeout(() => {
+                loadingScreen.style.display = 'none';
+                initGame(); 
+                requestAnimationFrame(gameLoop);
+            }, 800); // 渐隐过渡 0.8 秒后正式启动游戏
+        }
+    }
+}
+
+// 循环加载所有的贴图
+for (let key in assetPaths) {
+    ASSETS[key] = new Image();
+    ASSETS[key].onload = checkLoadComplete;
+    ASSETS[key].onerror = checkLoadComplete; // 即使加载失败也允许进入游戏(有图形替补)
+    ASSETS[key].src = assetPaths[key];
+}
+
 </script>
 </body>
 </html>
