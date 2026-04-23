@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>丧尸割草 Demo - 绝对铁壁防守版</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; display: flex; justify-content: center; align-items: center; touch-action: none; font-family: sans-serif; user-select: none; }
+        #game-container { position: relative; width: auto; height: 100vh; aspect-ratio: 1080 / 1920; background-color: #1a1a1a; overflow: hidden; box-shadow: 0 0 30px rgba(255, 255, 255, 0.1); }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        #center-alert {
+            position: absolute; top: 15%; left: 50%; transform: translateX(-50%);
+            color: #ff0055; font-size: 32px; font-weight: bold; text-shadow: 2px 2px 5px black, 0 0 20px #ff0055;
+            pointer-events: none; z-index: 50; opacity: 0; transition: opacity 0.5s; text-align: center;
+            width: 90%; line-height: 1.4;
+        }
+
+        #hud-top {
+            position: absolute; top: 20px; left: 20px; right: 20px;
+            display: flex; justify-content: space-between; align-items: flex-start;
+            z-index: 10; pointer-events: none; transition: opacity 0.5s;
+        }
+        #player-profile {
+            display: flex; align-items: center; background: rgba(0, 0, 0, 0.6);
+            padding: 8px 15px 8px 8px; border-radius: 50px; border: 2px solid #555; backdrop-filter: blur(4px);
+        }
+        #avatar-box {
+            width: 64px; height: 64px; border-radius: 50%; overflow: hidden;
+            border: 3px solid #00ccff; background: #333; flex-shrink: 0;
+            display: flex; justify-content: center; align-items: center; font-size: 24px;
+        }
+        #avatar-box img { width: 100%; height: 100%; object-fit: cover; }
+        #profile-info { margin-left: 12px; display: flex; flex-direction: column; }
+        #player-name { color: white; font-size: 20px; font-weight: bold; text-shadow: 1px 1px 2px black; margin-bottom: 4px; }
+        #hp-bar-container {
+            width: 150px; height: 18px; background: #222; border-radius: 10px;
+            border: 2px solid #000; position: relative; overflow: hidden; box-shadow: inset 0 2px 5px rgba(0,0,0,0.8);
+        }
+        #hp-bar-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #ff0055, #00ffaa); transition: width 0.2s ease-out, background 0.3s; }
+        #hp-text {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            color: white; font-size: 12px; font-weight: bold; text-shadow: 1px 1px 1px black;
+        }
+
+        #resource-panel { display: flex; gap: 10px; flex-direction: column; align-items: flex-end; }
+        .res-item {
+            display: flex; align-items: center; background: rgba(0, 0, 0, 0.6);
+            padding: 5px 15px 5px 5px; border-radius: 30px; border: 2px solid #555; backdrop-filter: blur(4px);
+        }
+        .res-icon {
+            width: 36px; height: 36px; border-radius: 50%; background: #444;
+            display: flex; justify-content: center; align-items: center; margin-right: 10px;
+            font-size: 20px; border: 2px solid #888; overflow: hidden;
+        }
+        .res-icon img { width: 100%; height: 100%; object-fit: contain; }
+        .res-value { color: white; font-size: 22px; font-weight: bold; text-shadow: 1px 1px 2px black; min-width: 40px; text-align: right; }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="center-alert"></div>
+        <div id="hud-top">
+            <div id="player-profile">
+                <div id="avatar-box"><img id="ui-avatar" src="./avatar.png" alt="头" onerror="this.style.display='none'"></div>
+                <div id="profile-info">
+                    <div id="player-name">废土幸存者</div>
+                    <div id="hp-bar-container"><div id="hp-bar-fill"></div><div id="hp-text">100/100</div></div>
+                </div>
+            </div>
+            <div id="resource-panel">
+                <div class="res-item"><div class="res-icon"><img src="./res_wood.png" onerror="this.style.display='none'; this.parentNode.innerText='🪵'"></div><span class="res-value" id="val-wood">0</span></div>
+                <div class="res-item"><div class="res-icon"><img src="./res_iron.png" onerror="this.style.display='none'; this.parentNode.innerText='🛡️'"></div><span class="res-value" id="val-iron">0</span></div>
+                <div class="res-item"><div class="res-icon"><img src="./res_screw.png" onerror="this.style.display='none'; this.parentNode.innerText='🔩'"></div><span class="res-value" id="val-screw">0</span></div>
+            </div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+<script>
+/** ==========================================
+ * 0. 游戏全局配置
+ * ========================================== */
+const GameConfig = {
+    tower2: { offsetX: 300, offsetY: -150 },
+    walls: {
+        segmentLen: 115,            
+        wall2StartOffset: { x: -10, y: 70 }, 
+        wall3StartOffset: { x: 110, y: 20 },   
+        stepOffset: { x: 55, y: -45 }        
+    }
+};
+
+const PART_TYPES = {
+    tree1: { colRadius: 25, colOffsetY: 0, isForest: true },
+    tree2: { colRadius: 20, colOffsetY: 0, isForest: true },
+    tree3: { colRadius: 18, colOffsetY: 0 },
+    tree4: { colRadius: 22, colOffsetY: 0 },
+    bush1: { colRadius: 15, colOffsetY: 0 },
+    bush2: { colRadius: 15, colOffsetY: 0 },
+    grass: { colRadius: 0,  colOffsetY: 0 }, 
+    stone1:{ colRadius: 30, colOffsetY: 0 },
+    stone2:{ colRadius: 40, colOffsetY: 0 },
+    stone3:{ colRadius: 55, colOffsetY: 0 },
+    car1:  { colRadius: 60, colOffsetY: 0 },
+    car2:  { colRadius: 65, colOffsetY: 0 },
+    car3:  { colRadius: 60, colOffsetY: 0 },
+    house1:{ colRadius: 120,colOffsetY: 0 },
+    house2:{ colRadius: 140,colOffsetY: 0 },
+    debris:{ colRadius: 0,  colOffsetY: 0 }  
+};
+
+const ASSETS = {
+    player_idle: new Image(), player_move: new Image(), player_shoot: new Image(), player_move_shoot: new Image(),
+    npc_run: new Image(), npc_fall: new Image(), npc_dead: new Image(),
+    tower_broken: new Image(), tower_active: new Image(),
+    zombie1: new Image(), zombie2: new Image(), boss: new Image(), bullet: new Image(), bg: new Image(),
+    res_wood: new Image(), res_iron: new Image(), res_screw: new Image(),
+    wall1: new Image(), wall2: new Image(),
+    tree1: new Image(), tree2: new Image(), tree3: new Image(), tree4: new Image(),
+    bush1: new Image(), bush2: new Image(), grass: new Image(),
+    stone1: new Image(), stone2: new Image(), stone3: new Image(),
+    car1: new Image(), car2: new Image(), car3: new Image(),
+    house1: new Image(), house2: new Image(), debris: new Image()
+};
+ASSETS.player_idle.src = './player_idle.png'; ASSETS.player_move.src = './player_move.png';
+ASSETS.player_shoot.src = './player_shoot.png'; ASSETS.player_move_shoot.src = './player_move_shoot.png';
+ASSETS.npc_run.src = './npc_run.png'; ASSETS.npc_fall.src = './npc_fall.png'; ASSETS.npc_dead.src = './npc_dead.png'; 
+ASSETS.tower_broken.src = './tower_broken.png'; ASSETS.tower_active.src = './tower_active.png'; 
+ASSETS.zombie1.src = './zombie1.png'; ASSETS.zombie2.src = './zombie2.png'; ASSETS.boss.src = './boss.png';
+ASSETS.bullet.src = './bullet.png'; ASSETS.bg.src = './bg.png';
+ASSETS.res_wood.src = './res_wood.png'; ASSETS.res_iron.src = './res_iron.png'; ASSETS.res_screw.src = './res_screw.png';
+ASSETS.wall1.src = './wall1.png'; ASSETS.wall2.src = './wall2.png'; 
+for(let key in PART_TYPES) { ASSETS[key].src = `./${key}.png`; }
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const width = 1080; const height = 1920;
+canvas.width = width; canvas.height = height;
+
+if (!ctx.roundRect) { ctx.roundRect = function(x, y, w, h, r) { this.rect(x, y, w, h); return this; } }
+if (!ctx.ellipse) { ctx.ellipse = function(x, y, rx, ry, rot, sa, ea) { this.save(); this.translate(x, y); this.rotate(rot); this.scale(rx, ry); this.arc(0, 0, 1, sa, ea); this.restore(); } }
+
+const fogCanvas = document.createElement('canvas'); fogCanvas.width = width; fogCanvas.height = height;
+const fctx = fogCanvas.getContext('2d');
+const FOG_TILE_SIZE = 100; const fogSet = new Set();  
+
+let gameState = 'intro'; let alertHideTime = 0; 
+let tutorialPhase = 'get_gun'; let totalResourcesCollected = 0; let wallResourcesCollected = 0;
+let siegeStarted = false; let siegeStartTime = 0; let bossSpawnedInSiege = false; let hordeStartTime = Infinity;
+
+const player = {
+    x: 0, y: 0, hp: 100, maxHp: 100, speed: 5.0, colRadius: 20, 
+    visionRadius: 550, aggroRadius: 800, attackRadius: 250, 
+    lastShotTime: 0, shotInterval: 800, lastHealTime: 0, isHealing: false, hasGun: false, 
+    state: 'idle', facingRight: true, frameX: 0, frameTimer: 0, frameInterval: 120, 
+    spriteWidth: 128, spriteHeight: 128, framesConfig: { 'idle': 8, 'move': 5, 'shoot': 6, 'move_shoot': 7 },
+    spriteOffsetX: 20, spriteOffsetY: -20, inventory: { wood: 0, iron: 0, screw: 0 }
+};
+
+let zombies = []; let bullets = []; let damageTexts = []; let npcs = []; let resources = []; let gunDrop = null; let kills = 0;
+let tower = null; let tower2 = null; let gate = null; let walls = []; let sceneParts = []; 
+let wallBuildPoint = null; 
+const joystick = { active: false, startX: 0, startY: 0, currentX: 0, currentY: 0, vectorX: 0, vectorY: 0, maxRadius: 120 };
+
+function showCenterAlert(text, color, durationMs) {
+    let alertDiv = document.getElementById('center-alert');
+    if(alertDiv) {
+        alertDiv.innerText = text; alertDiv.style.color = color;
+        alertDiv.style.textShadow = `2px 2px 5px black, 0 0 20px ${color}`;
+        alertDiv.style.opacity = '1'; alertHideTime = performance.now() + durationMs;
+    }
+}
+
+function addDamageText(x, y, text, fillColor, strokeColor) {
+    damageTexts.push({
+        x: x, y: y, text: text,
+        life: 2000, maxLife: 2000, 
+        fillColor: fillColor, strokeColor: strokeColor
+    });
+}
+
+/** ==========================================
+ * 物理引擎中心
+ * ========================================== */
+function resolvePhysics(entity) {
+    let entityRadius = entity.colRadius || (entity.size ? entity.size * 0.4 : 20); 
+    let isBlocked = false; 
+    
+    let colliders = [...sceneParts, ...walls];
+    if (tower) colliders.push({ x: tower.x, y: tower.y + 120, colRadius: 50 }); 
+    if (tower2) colliders.push({ x: tower2.x, y: tower2.y + 120, colRadius: 50 });
+    
+    if (gate) {
+        let dist = gate.distToSegment(entity.x, entity.y);
+        if (dist < entityRadius + gate.thickness/2) {
+            let dx = gate.x2 - gate.x1; let dy = gate.y2 - gate.y1; let len = Math.hypot(dx, dy);
+            let nx = -dy / len; let ny = dx / len; 
+            let dot = (entity.x - gate.x1) * nx + (entity.y - gate.y1) * ny;
+            
+            let t = ((entity.x - gate.x1) * dx + (entity.y - gate.y1) * dy) / (len * len);
+            let gapSize = 0.4 * gate.openProgress; 
+            let isInGap = (t > 0.5 - gapSize/2 && t < 0.5 + gapSize/2);
+            
+            if (!isInGap) {
+                let pushForce = entity.speed ? entity.speed + 1 : 6;
+                if (dot > 0) { entity.x += nx * pushForce; entity.y += ny * pushForce; } 
+                else { entity.x -= nx * pushForce; entity.y -= ny * pushForce; }
+                isBlocked = true;
+            }
+        }
+    }
+
+    for (let c of colliders) {
+        let r = c.colRadius !== undefined ? c.colRadius : c.radius; 
+        if (!r || r === 0) continue; 
+        
+        let cy = c.colOffsetY ? c.y + c.colOffsetY : c.y; 
+        let cx = c.x;
+
+        let dx = entity.x - cx; let dy = entity.y - cy;
+        let dist = Math.hypot(dx, dy);
+        let minDist = entityRadius + r;
+        
+        if (dist > 0 && dist < minDist) {
+            let overlap = minDist - dist;
+            entity.x += (dx/dist) * overlap; entity.y += (dy/dist) * overlap;
+            isBlocked = true;
+        }
+    }
+    
+    if (entity.type && isBlocked) return true;
+    return false;
+}
+
+/** ==========================================
+ * 实体类定义 
+ * ========================================== */
+class ScenePart {
+    constructor(type, x, y) {
+        this.type = type; this.x = x; this.y = y;
+        this.config = PART_TYPES[type];
+        this.scale = 2.0;
+        this.colRadius = this.config.colRadius * this.scale;
+        this.colOffsetY = this.config.colOffsetY * this.scale;
+    }
+    draw(screenX, screenY) {
+        let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
+        if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
+
+        let img = ASSETS[this.type];
+        ctx.save();
+        if (img.complete && img.naturalWidth !== 0) {
+            let nw = img.naturalWidth * this.scale; 
+            let nh = img.naturalHeight * this.scale;
+            ctx.drawImage(img, screenX - nw/2, screenY - nh, nw, nh);
+        } else {
+            let fallbackSize = this.colRadius > 0 ? this.colRadius * 2 : 40 * this.scale;
+            ctx.fillStyle = this.type.includes('tree') ? '#2e8b57' : (this.type.includes('stone') ? '#778899' : (this.type.includes('house') ? '#8b4513' : '#556b2f'));
+            ctx.beginPath(); ctx.ellipse(screenX, screenY - fallbackSize/2, fallbackSize/2, fallbackSize/2, 0, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+class Resource {
+    constructor(x, y, type) {
+        this.x = x; this.y = y; this.type = type; 
+        this.size = 60; this.pickupRadius = 60;
+    }
+    update(dt) {} 
+    draw(screenX, screenY) {
+        let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
+        if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
+
+        let img = ASSETS['res_' + this.type];
+        ctx.save(); ctx.shadowColor = '#fffacd'; ctx.shadowBlur = 4;
+        if (img.complete && img.naturalWidth !== 0) {
+            ctx.drawImage(img, screenX - this.size/2, screenY - this.size/2, this.size, this.size);
+        } else {
+            ctx.fillStyle = this.type === 'wood' ? '#8b5a2b' : (this.type === 'iron' ? '#b0c4de' : '#a9a9a9');
+            ctx.beginPath(); ctx.arc(screenX, screenY, this.size/2, 0, Math.PI*2); ctx.fill(); 
+        }
+        ctx.restore();
+    }
+}
+
+class WallSegment {
+    constructor(x, y, flipX) {
+        this.x = x; this.y = y; 
+        this.flipX = flipX; 
+        this.scale = 1.8; 
+        this.radius = 32 * this.scale; 
+        this.imgType = Math.random() > 0.5 ? 1 : 2; 
+        this.hp = 300; this.maxHp = 300;
+    }
+    update(dt) {} 
+    
+    draw(screenX, screenY) {
+        let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
+        if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
+
+        let img = this.imgType === 1 ? ASSETS.wall1 : ASSETS.wall2;
+        let downOffset = 22; 
+
+        ctx.save(); 
+        ctx.translate(screenX, screenY); 
+
+        if (this.flipX) ctx.scale(-1, 1); 
+        ctx.scale(this.scale, this.scale); 
+
+        if (img.complete && img.naturalWidth !== 0) {
+            ctx.drawImage(img, -64, -100 + downOffset, 128, 128);
+        } else {
+            ctx.fillStyle = '#555'; ctx.fillRect(-32, -64 + downOffset, 64, 64);
+            ctx.strokeStyle = '#222'; ctx.lineWidth = 3; ctx.strokeRect(-32, -64 + downOffset, 64, 64);
+            ctx.fillStyle = '#666'; ctx.fillRect(-32, -64 + downOffset, 64, 8); 
+            ctx.beginPath(); ctx.moveTo(-32, -32 + downOffset); ctx.lineTo(32, -32 + downOffset); ctx.stroke(); 
+            ctx.beginPath(); ctx.moveTo(0, -64 + downOffset); ctx.lineTo(0, -32 + downOffset); ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    drawHP(screenX, screenY) {
+        let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
+        if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
+
+        let hpY = -120 - 40; 
+        ctx.save();
+        ctx.translate(screenX, screenY);
+        if (this.hp < this.maxHp) {
+            ctx.fillStyle = '#000'; ctx.fillRect(-32, hpY - 2, 64, 10); 
+            ctx.fillStyle = '#ff0000'; ctx.fillRect(-31, hpY - 1, 62, 8); 
+            ctx.fillStyle = '#00ffaa'; ctx.fillRect(-31, hpY - 1, 62 * Math.max(0, this.hp / this.maxHp), 8); 
+        }
+        ctx.restore();
+    }
+}
+
+class Gate {
+    constructor(x1, y1, x2, y2) {
+        this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2;
+        this.openProgress = 0; this.thickness = 40;
+        this.locked = false; 
+    }
+    update(dt) {
+        let distToPlayer = this.distToSegment(player.x, player.y);
+        
+        let dx = this.x2 - this.x1; let dy = this.y2 - this.y1; let len = Math.hypot(dx, dy);
+        let nx = -dy / len; let ny = dx / len; 
+        let dot = (player.x - this.x1) * nx + (player.y - this.y1) * ny;
+
+        if (siegeStarted && !this.locked) {
+            if (dot > 80 && distToPlayer > 80) {
+                this.locked = true;
+                showCenterAlert("🔒 要塞大门已锁死！准备迎战！", "#ffcc00", 3000);
+            }
+        }
+
+        if (!this.locked && distToPlayer < 250) { 
+            this.openProgress = Math.min(1, this.openProgress + dt / 300); 
+        } else { 
+            this.openProgress = Math.max(0, this.openProgress - dt / 300); 
+        }
+
+        if (siegeStarted && this.locked) {
+            let hasActiveZombies = zombies.some(z => z.hp > 0 && (z.type === 'siege' || z.type === 'boss'));
+            if (!hasActiveZombies && bossSpawnedInSiege) {
+                this.locked = false;
+            }
+        }
+    }
+    distToSegment(px, py) {
+        let l2 = Math.pow(this.x2 - this.x1, 2) + Math.pow(this.y2 - this.y1, 2);
+        if (l2 === 0) return Math.hypot(px - this.x1, py - this.y1);
+        let t = Math.max(0, Math.min(1, ((px - this.x1) * (this.x2 - this.x1) + (py - this.y1) * (this.y2 - this.y1)) / l2));
+        let projX = this.x1 + t * (this.x2 - this.x1); let projY = this.y1 + t * (this.y2 - this.y1);
+        return Math.hypot(px - projX, py - projY);
+    }
+    draw(screenXOffset, screenYOffset) {
+        let midWorldX = (this.x1 + this.x2)/2; let midWorldY = (this.y1 + this.y2)/2;
+        let gridX = Math.floor(midWorldX / FOG_TILE_SIZE); let gridY = Math.floor(midWorldY / FOG_TILE_SIZE);
+        if (!fogSet.has(`${gridX},${gridY}`)) return;
+
+        let sx1 = this.x1 - player.x + width/2; let sy1 = this.y1 - player.y + height/2;
+        let sx2 = this.x2 - player.x + width/2; let sy2 = this.y2 - player.y + height/2;
+        let midX = (sx1 + sx2) / 2; let midY = (sy1 + sy2) / 2;
+
+        ctx.save(); ctx.strokeStyle = '#222'; ctx.lineWidth = this.thickness; ctx.lineCap = 'butt';
+        let fullDist = Math.hypot(sx2-sx1, sy2-sy1);
+        let gapWidth = (fullDist / 2 - 20) * this.openProgress; 
+        let angle = Math.atan2(sy2 - sy1, sx2 - sx1);
+        let dx = Math.cos(angle); let dy = Math.sin(angle);
+        
+        let d1EndX = midX - dx * gapWidth; let d1EndY = midY - dy * gapWidth;
+        let d2StartX = midX + dx * gapWidth; let d2StartY = midY + dy * gapWidth;
+
+        ctx.beginPath(); ctx.moveTo(sx1, sy1); ctx.lineTo(d1EndX, d1EndY); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(d2StartX, d2StartY); ctx.stroke();
+        
+        ctx.strokeStyle = this.locked ? '#ff0000' : '#00ffcc'; 
+        ctx.lineWidth = 15; ctx.shadowColor = this.locked ? '#ff0000' : '#00ffcc'; ctx.shadowBlur = 20;
+        if(this.openProgress > 0.1 && !this.locked) { ctx.strokeStyle = '#ffcc00'; ctx.shadowColor = '#ffcc00'; } 
+        ctx.beginPath(); ctx.moveTo(sx1, sy1); ctx.lineTo(d1EndX, d1EndY); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(d2StartX, d2StartY); ctx.stroke();
+        ctx.restore();
+    }
+}
+
+class Tower {
+    constructor(x, y, label) {
+        this.x = x; this.y = y; this.state = 'broken'; this.label = label || "防御塔";
+        this.repairTimer = 0; this.repairTimeMax = 2000; 
+        this.attackRadius = 500; this.lastShotTime = 0; this.shotInterval = 800; 
+        this.size = 100; this.imgWidth = 256; this.imgHeight = 512;
+        this.showEffect = false; this.effectRadius = 0;
+    }
+    update(dt, time) {
+        if (this.state === 'repairing') {
+            this.repairTimer += dt;
+            if (this.repairTimer >= this.repairTimeMax) { 
+                this.state = 'active'; this.showEffect = true; this.effectRadius = 0;
+                addDamageText(this.x, this.y - 300, `✨ ${this.label} 已部署 ✨`, '#00ffcc', '#000000');
+            }
+        } else if (this.state === 'active') {
+            if (time - this.lastShotTime > this.shotInterval) {
+                let closestDist = Infinity; let targetZombie = null;
+                for (let z of zombies) {
+                    if (z.hp <= 0) continue;
+                    let d = Math.hypot(z.x - this.x, z.y - this.y);
+                    if (d < this.attackRadius && d < closestDist) { closestDist = d; targetZombie = z; }
+                }
+                if (targetZombie) { bullets.push(new Bullet(this.x, this.y - 200, targetZombie)); this.lastShotTime = time; }
+            }
+        }
+    }
+    draw(screenX, screenY) {
+        let tGridX = Math.floor(this.x / FOG_TILE_SIZE); let tGridY = Math.floor(this.y / FOG_TILE_SIZE);
+        if (!fogSet.has(`${tGridX},${tGridY}`) && gameState !== 'intro') return;
+
+        let isPlayerBehind = (player.y < this.y + 50 && player.y > this.y - 450 && Math.abs(player.x - this.x) < 150);
+        ctx.globalAlpha = isPlayerBehind ? 0.4 : 1.0;
+
+        let img = this.state === 'active' ? ASSETS.tower_active : ASSETS.tower_broken;
+        let drawX = screenX - this.imgWidth / 2; let drawY = screenY - this.imgHeight + 120;
+
+        if (img.complete && img.naturalWidth !== 0) {
+            ctx.drawImage(img, drawX, drawY, this.imgWidth, this.imgHeight);
+            if (this.state === 'broken') {
+                ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = 0.3 + Math.sin(Date.now()/200)*0.2;
+                ctx.drawImage(img, drawX, drawY, this.imgWidth, this.imgHeight);
+                ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1.0;
+            }
+        } else {
+            ctx.fillStyle = this.state === 'active' ? '#00ccff' : '#555555'; ctx.fillRect(drawX, drawY, this.imgWidth, this.imgHeight);
+            if (this.state === 'active') {
+                ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(screenX, screenY - 200, 30, 0, Math.PI*2); ctx.fill();
+                ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 40; ctx.fill(); ctx.shadowBlur = 0;
+            }
+        }
+        ctx.globalAlpha = 1.0; 
+
+        if (this.showEffect) {
+            this.effectRadius += 25; let effectAlpha = Math.max(0, 1 - this.effectRadius / 800);
+            ctx.strokeStyle = `rgba(0, 255, 200, ${effectAlpha})`; ctx.lineWidth = 15;
+            ctx.beginPath(); ctx.arc(screenX, screenY, this.effectRadius, 0, Math.PI*2); ctx.stroke();
+            ctx.fillStyle = `rgba(255, 255, 255, ${effectAlpha})`; ctx.beginPath(); ctx.arc(screenX, screenY - 200, this.effectRadius/4, 0, Math.PI*2); ctx.fill();
+            if (this.effectRadius > 800) this.showEffect = false;
+        }
+
+        if (this.state === 'repairing') {
+            ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(screenX - 80, screenY + 60, 160, 15);
+            ctx.fillStyle = '#00ffcc'; ctx.fillRect(screenX - 80, screenY + 60, 160 * (this.repairTimer/this.repairTimeMax), 15);
+            ctx.fillStyle = 'white'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign='center'; ctx.fillText("部署中...", screenX, screenY + 100); ctx.textAlign='left';
+        }
+    }
+}
+
+class NPC {
+    constructor(x, y, isMale) {
+        this.x = x; this.y = y; 
+        this.hp = 10;  // 【修改：降低血量，使其在开局被丧尸秒杀】
+        this.speed = 1.5; // 【修改：降低移速，确保被丧尸追上】
+        this.color = isMale ? '#ffaa00' : '#00ddff'; this.size = 40;
+        this.state = 'run'; this.frameX = 0; this.frameTimer = 0; this.frameInterval = 120; 
+        this.spriteWidth = 128; this.spriteHeight = 128; this.framesConfig = { 'run': 4, 'fall': 4 };
+    }
+    update(dt) {
+        if (this.state === 'dead') return; 
+        if (this.hp <= 0 && this.state === 'run') { this.state = 'fall'; this.frameX = 0; this.frameTimer = 0; }
+        if (this.state === 'run') { this.y += this.speed; }
+        this.frameTimer += dt;
+        if (this.frameTimer > this.frameInterval) {
+            if (this.state === 'fall') { if (this.frameX < this.framesConfig['fall'] - 1) { this.frameX++; } else { this.state = 'dead'; }
+            } else { this.frameX = (this.frameX + 1) % this.framesConfig['run']; }
+            this.frameTimer = 0; 
+        }
+    }
+    draw(screenX, screenY) {
+        let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
+        if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
+
+        if (this.state === 'dead') {
+            let img = ASSETS.npc_dead;
+            if (img.complete && img.naturalWidth !== 0) {
+                ctx.save(); ctx.translate(screenX, screenY); ctx.drawImage(img, -64, -64, 128, 128); ctx.restore();
+            } else { ctx.fillStyle = '#444444'; ctx.beginPath(); ctx.arc(screenX, screenY, this.size, 0, Math.PI*2); ctx.fill(); }
+        } else {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; ctx.beginPath(); ctx.ellipse(screenX, screenY + 45, 30, 15, 0, 0, Math.PI*2); ctx.fill();
+            let img = this.state === 'run' ? ASSETS.npc_run : ASSETS.npc_fall;
+            if (img.complete && img.naturalWidth !== 0) {
+                let sx = this.frameX * this.spriteWidth;
+                if (sx + this.spriteWidth <= img.naturalWidth && this.spriteHeight <= img.naturalHeight) {
+                    ctx.save(); ctx.translate(screenX, screenY); ctx.drawImage(img, sx, 0, this.spriteWidth, this.spriteHeight, -64, -64, 128, 128); ctx.restore();
+                } else { ctx.fillStyle = '#ff00ff'; ctx.fillRect(screenX - 30, screenY - 40, 60, 80); }
+            } else { ctx.fillStyle = this.state === 'run' ? this.color : 'red'; ctx.beginPath(); ctx.arc(screenX, screenY, this.size, 0, Math.PI*2); ctx.fill(); }
+        }
+        if (this.state === 'run') { ctx.fillStyle = 'white'; ctx.font = '20px sans-serif'; ctx.fillText("救命!", screenX - 25, screenY - 50); }
+    }
+}
+
+class Zombie {
+    constructor(x, y, type) {
+        this.x = x; this.y = y; this.type = type; this.state = 'idle'; this.stateTimer = 0; this.wanderVec = {x: 0, y: 0}; this.lastAttackTime = 0;
+        this.isInitial = false; 
+        this.aggroRadius = 800; 
+        this.targetWall = null; 
+        
+        if (type === 'boss') { 
+            this.hp = 300; this.maxHp = 300; this.baseSpeed = 1.0; this.chaseSpeed = 2.0; this.size = 120; this.minDmg = 10; this.maxDmg = 20; this.attackInterval = 1500; 
+            this.aggroRadius = Infinity; 
+        } 
+        else if (type === 'siege') {
+            this.hp = 30; this.maxHp = 30; this.baseSpeed = 2.0; this.chaseSpeed = 3.5; this.size = 50; this.minDmg = 5; this.maxDmg = 8; 
+            this.attackInterval = 2500; 
+            this.aggroRadius = Infinity; 
+        }
+        else if (type === 'normal2') { 
+            this.hp = 50; this.maxHp = 50; this.baseSpeed = 1.5; this.chaseSpeed = 3.0; this.size = 60; this.minDmg = 5; this.maxDmg = 8; this.attackInterval = 1000; 
+        } 
+        else { 
+            this.hp = 10; this.maxHp = 10; this.baseSpeed = 2.0; this.chaseSpeed = 3.5; this.size = 50; this.minDmg = 5; this.maxDmg = 8; this.attackInterval = 1000; 
+        }
+    }
+    update(dt, time, targets) {
+        let targetX = player.x; let targetY = player.y; let targetEntity = player;
+        let isTargetingWall = false;
+
+        if (this.type === 'siege') {
+            if (!this.targetWall || this.targetWall.hp <= 0) {
+                if (walls.length > 0) { this.targetWall = walls[Math.floor(Math.random() * walls.length)]; } 
+                else { this.targetWall = null; }
+            }
+            if (this.targetWall) {
+                targetX = this.targetWall.x; targetY = this.targetWall.y;
+                isTargetingWall = true;
+            }
+        }
+
+        if (!isTargetingWall) {
+            let target = null; let minDist = Infinity;
+            for (let t of targets) {
+                if (t.hp <= 0) continue;
+                let d = Math.hypot(t.x - this.x, t.y - this.y);
+                if (d < minDist) { minDist = d; target = t; }
+            }
+            if (!target) return;
+            targetX = target.x; targetY = target.y; targetEntity = target;
+        }
+
+        let distToTarget = Math.hypot(targetX - this.x, targetY - this.y);
+        
+        if (!isTargetingWall && distToTarget > 3000 && this.type !== 'boss' && this.type !== 'siege' && gameState === 'playing') { this.hp = 0; return; }
+        
+        if (distToTarget < this.aggroRadius || isTargetingWall) { this.state = 'chase'; } else if (this.state === 'chase') { this.state = 'idle'; }
+
+        this.stateTimer -= dt;
+        if (this.stateTimer <= 0 && this.state !== 'chase') {
+            if (Math.random() < 0.7) { this.state = 'idle'; this.stateTimer = 2000 + Math.random() * 2000; } 
+            else { this.state = 'wander'; this.stateTimer = 1000 + Math.random() * 1500; let angle = Math.random() * Math.PI * 2; this.wanderVec = { x: Math.cos(angle), y: Math.sin(angle) }; }
+        }
+
+        if (this.state === 'chase' && distToTarget > 0) { 
+            this.x += ((targetX - this.x) / distToTarget) * this.chaseSpeed; 
+            this.y += ((targetY - this.y) / distToTarget) * this.chaseSpeed; 
+        } 
+        else if (this.state === 'wander') { this.x += this.wanderVec.x * this.baseSpeed; this.y += this.wanderVec.y * this.baseSpeed; }
+
+        let repulseX = 0; let repulseY = 0;
+        for (let other of zombies) {
+            if (other === this || other.hp <= 0) continue;
+            let dx = this.x - other.x; let dy = this.y - other.y; let dist = Math.hypot(dx, dy);
+            let overlapDist = (this.size + other.size) * 0.7; 
+            if (dist > 0 && dist < overlapDist) {
+                let force = (overlapDist - dist) / overlapDist; repulseX += (dx / dist) * force * 1.5; repulseY += (dy / dist) * force * 1.5;
+            }
+        }
+        this.x += repulseX; this.y += repulseY;
+
+        let isPhysicallyBlocked = resolvePhysics(this); 
+
+        if (isPhysicallyBlocked && this.state === 'chase') {
+            let hitWall = null; let closestWallDist = Infinity;
+            for (let w of walls) {
+                let d = Math.hypot(this.x - w.x, this.y - w.y);
+                if (d < this.size * 0.8 + w.radius && d < closestWallDist) { 
+                    hitWall = w; closestWallDist = d;
+                }
+            }
+            
+            if (hitWall && time - this.lastAttackTime > this.attackInterval) {
+                hitWall.hp -= 3; 
+                this.lastAttackTime = time;
+                addDamageText(hitWall.x, hitWall.y - 60, "-3", '#ff0000', '#ffffff');
+            }
+        }
+
+        if (!isTargetingWall) {
+            let tSize = targetEntity.size || 50; 
+            if (distToTarget < this.size + tSize && time - this.lastAttackTime > this.attackInterval) {
+                let dmg = Math.floor(Math.random() * (this.maxDmg - this.minDmg + 1)) + this.minDmg; 
+                targetEntity.hp -= dmg; this.lastAttackTime = time;
+                // 受击红色白边
+                addDamageText(targetEntity.x, targetEntity.y - 80, `-${dmg}`, '#ff0000', '#ffffff');
+            }
+        }
+    }
+    draw(screenX, screenY) {
+        let zGridX = Math.floor(this.x / FOG_TILE_SIZE); let zGridY = Math.floor(this.y / FOG_TILE_SIZE);
+        if (!fogSet.has(`${zGridX},${zGridY}`) && gameState !== 'intro') return;
+
+        let s = this.size * 2.5; let shadowYOffset = this.type === 'boss' ? s * 0.35 : 45;
+        let shadowRadiusX = this.type === 'boss' ? 70 : 35; let shadowRadiusY = this.type === 'boss' ? 35 : 18;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; ctx.beginPath(); ctx.ellipse(screenX, screenY + shadowYOffset, shadowRadiusX, shadowRadiusY, 0, 0, Math.PI*2); ctx.fill();
+
+        if (this.type !== 'boss' && gameState === 'intro') { } else {
+            let barWidth = this.type === 'boss' ? 200 : 80; let barOffset = this.type === 'boss' ? 100 : 60;
+            ctx.fillStyle = 'red'; ctx.fillRect(screenX - barWidth/2, screenY - barOffset, barWidth, 8);
+            ctx.fillStyle = '#0f0'; ctx.fillRect(screenX - barWidth/2, screenY - barOffset, barWidth * (this.hp/this.maxHp), 8);
+        }
+        let img = ASSETS[this.type === 'normal2' ? 'zombie2' : (this.type === 'boss' ? 'boss' : 'zombie1')];
+        if (this.type === 'siege') img = ASSETS['zombie1'];
+        
+        if (img.complete && img.naturalWidth !== 0) { ctx.drawImage(img, screenX - s/2, screenY - s/2, s, s); } 
+        else { ctx.fillStyle = this.type === 'boss' ? '#800080' : (this.type === 'normal2' ? '#006400' : '#00cc00'); ctx.beginPath(); ctx.arc(screenX, screenY, this.size, 0, Math.PI*2); ctx.fill(); }
+    }
+}
+
+class Bullet {
+    constructor(startX, startY, target) {
+        this.x = startX; this.y = startY; let dx = target.x - startX; let dy = target.y - startY; let dist = Math.hypot(dx, dy);
+        this.vx = (dx / dist) * 35; this.vy = (dy / dist) * 35; this.damage = Math.floor(Math.random() * 11) + 10; this.life = 100;
+    }
+    update() {
+        this.x += this.vx; this.y += this.vy; this.life--;
+        for (let z of zombies) {
+            if (Math.hypot(z.x - this.x, z.y - this.y) < z.size + 20) {
+                z.hp -= this.damage; z.x += this.vx * (z.type === 'boss' ? 0.1 : 0.8); z.y += this.vy * (z.type === 'boss' ? 0.1 : 0.8);
+                // 【角色攻击】：橘黄棕边
+                addDamageText(z.x, z.y - z.size - 20, `-${this.damage}`, '#ffa500', '#5c4033');
+                this.life = 0; break;
+            }
+        }
+    }
+    draw(screenX, screenY) {
+        if (ASSETS.bullet.complete && ASSETS.bullet.naturalWidth !== 0) {
+            let angle = Math.atan2(this.vy, this.vx); ctx.save(); ctx.translate(screenX, screenY); ctx.rotate(angle);
+            ctx.drawImage(ASSETS.bullet, -20, -10, 40, 20); ctx.restore(); 
+        } else { ctx.fillStyle = 'yellow'; ctx.beginPath(); ctx.arc(screenX, screenY, 10, 0, Math.PI*2); ctx.fill(); }
+    }
+}
+
+/** ==========================================
+ * 控制器与建造系统
+ * ========================================== */
+function getMappedPos(e) {
+    const touch = e.touches ? e.touches[0] : e; const rect = canvas.getBoundingClientRect();
+    return { x: (touch.clientX - rect.left) * (canvas.width / rect.width), y: (touch.clientY - rect.top) * (canvas.height / rect.height) };
+}
+
+function handleStart(e) { 
+    if (gameState === 'intro') return; 
+    if (gameState === 'tutorial') { 
+        gameState = 'playing'; player.lastShotTime = performance.now(); 
+        tutorialPhase = 'kill_2_zombies'; 
+        showCenterAlert("🔫 获得武器！请击杀周围 2 只丧尸以确认安全！", "#ffcc00", 5000);
+    }
+    
+    const pos = getMappedPos(e); 
+    
+    if (gameState === 'playing') {
+        let targetObj = null; let btnX = 0; let btnY = 0;
+
+        if (activeTowerToRepair) {
+            if (activeTowerToRepair === 'wall') {
+                targetObj = 'wall'; btnX = wallBuildPoint.x - player.x + (width/2); btnY = wallBuildPoint.y - player.y + (height/2) + 60;
+            } else {
+                targetObj = activeTowerToRepair; btnX = activeTowerToRepair.x - player.x + (width/2); btnY = activeTowerToRepair.y - player.y + (height/2) + 60;
+            }
+        }
+
+        if (targetObj) {
+            if (Math.abs(pos.x - btnX) <= 130 && Math.abs(pos.y - btnY) <= 35) {
+                if (targetObj === 'wall') {
+                    tutorialPhase = 'done';
+                    let cfg = GameConfig.walls;
+                    let dx = tower2.x - tower.x; let dy = tower2.y - tower.y; 
+                    let len = Math.hypot(dx, dy); let ux = dx / len; let uy = dy / len; 
+                    let vx = -uy; let vy = ux; 
+
+                    let pA = { x: tower.x - ux * 3 * cfg.segmentLen, y: tower.y - uy * 3 * cfg.segmentLen };
+                    for(let i=1; i<=3; i++) { walls.push(new WallSegment(tower.x - ux * i * cfg.segmentLen, tower.y - uy * i * cfg.segmentLen, false)); }
+
+                    let pB = { x: tower2.x + ux * 3 * cfg.segmentLen, y: tower2.y + uy * 3 * cfg.segmentLen };
+                    for(let i=1; i<=3; i++) { walls.push(new WallSegment(tower2.x + ux * i * cfg.segmentLen, tower2.y + uy * i * cfg.segmentLen, false)); }
+
+                    // 【缝隙修补补丁】：在塔基与墙体之间，以及偏移拐角处追加承重墙，彻底焊死防线
+                    walls.push(new WallSegment(tower.x - ux * 0.6 * cfg.segmentLen, tower.y - uy * 0.6 * cfg.segmentLen, false)); 
+                    walls.push(new WallSegment(tower2.x + ux * 0.6 * cfg.segmentLen, tower2.y + uy * 0.6 * cfg.segmentLen, false));
+                    walls.push(new WallSegment(pA.x + cfg.wall2StartOffset.x * 0.5, pA.y + cfg.wall2StartOffset.y * 0.5, true));
+                    walls.push(new WallSegment(pB.x + cfg.wall3StartOffset.x * 0.5, pB.y + cfg.wall3StartOffset.y * 0.5, true));
+
+                    let w2StartX = pA.x + cfg.wall2StartOffset.x; let w2StartY = pA.y + cfg.wall2StartOffset.y; 
+                    let pD = { x: 0, y: 0 };
+                    for(let i=0; i<8; i++) {
+                        let curX = w2StartX + i * (vx * cfg.segmentLen + cfg.stepOffset.x);
+                        let curY = w2StartY + i * (vy * cfg.segmentLen + cfg.stepOffset.y);
+                        walls.push(new WallSegment(curX, curY, true));
+                        if (i === 7) pD = { x: curX, y: curY }; 
+                    }
+
+                    let w3StartX = pB.x + cfg.wall3StartOffset.x; let w3StartY = pB.y + cfg.wall3StartOffset.y; 
+                    let pC = { x: 0, y: 0 };
+                    for(let i=0; i<8; i++) {
+                        let curX = w3StartX + i * (vx * cfg.segmentLen + cfg.stepOffset.x);
+                        let curY = w3StartY + i * (vy * cfg.segmentLen + cfg.stepOffset.y);
+                        walls.push(new WallSegment(curX, curY, true));
+                        if (i === 7) pC = { x: curX, y: curY }; 
+                    }
+
+                    let bottomLen = Math.hypot(pC.x - pD.x, pC.y - pD.y);
+                    let bottomCount = Math.floor(bottomLen / cfg.segmentLen);
+                    let bux = (pC.x - pD.x) / bottomLen; let buy = (pC.y - pD.y) / bottomLen;
+                    for(let i=1; i<=bottomCount; i++) { walls.push(new WallSegment(pD.x + bux * i * cfg.segmentLen, pD.y + buy * i * cfg.segmentLen, false)); }
+
+                    siegeStarted = true;
+                    siegeStartTime = performance.now(); 
+                    showCenterAlert("🚨 丧尸围城！突击丧尸正从西北方逼近！撤回基地防守！", "#ff0000", 8000);
+
+                    let spawnOriginX = tower.x - 1500;
+                    let spawnOriginY = tower.y - 1500;
+                    for(let i=0; i<100; i++) {
+                        let zx = spawnOriginX + (Math.random() - 0.5) * 1000;
+                        let zy = spawnOriginY + (Math.random() - 0.5) * 1000;
+                        zombies.push(new Zombie(zx, zy, 'siege'));
+                    }
+
+                } else { targetObj.state = 'repairing'; }
+                return; 
+            } else { addDamageText(player.x, player.y - 100, "离太远了!", '#ffcc00', null); return; }
+        }
+    }
+
+    joystick.active = true; joystick.startX = pos.x; joystick.startY = pos.y; joystick.vectorX = 0; joystick.vectorY = 0; 
+}
+function handleMove(e) {
+    if (!joystick.active) return;
+    const pos = getMappedPos(e); let dx = pos.x - joystick.startX; let dy = pos.y - joystick.startY; let dist = Math.hypot(dx, dy);
+    if (dist > joystick.maxRadius) { dx = (dx / dist) * joystick.maxRadius; dy = (dy / dist) * joystick.maxRadius; }
+    joystick.vectorX = dx / joystick.maxRadius; joystick.vectorY = dy / joystick.maxRadius;
+}
+function handleEnd() { joystick.active = false; joystick.vectorX = 0; joystick.vectorY = 0; }
+canvas.addEventListener('mousedown', handleStart); window.addEventListener('mousemove', handleMove); window.addEventListener('mouseup', handleEnd);
+canvas.addEventListener('touchstart', handleStart, {passive: false}); window.addEventListener('touchmove', handleMove, {passive: false}); window.addEventListener('touchend', handleEnd);
+
+/** ==========================================
+ * 5. 生态场景生成算法
+ * ========================================== */
+function generateScene() {
+    const RANGE = 3000;
+    
+    function isInsideSafeZone(x, y) {
+        if (!tower) return Math.hypot(x, y) < 800; 
+        let midX = tower.x + GameConfig.tower2.offsetX / 2;
+        let midY = tower.y + GameConfig.tower2.offsetY / 2;
+        return Math.abs(x - midX) < 600 && Math.abs(y - midY) < 900;
+    }
+
+    for(let f=0; f<12; f++) {
+        let fx = (Math.random() - 0.5) * RANGE * 2; let fy = (Math.random() - 0.5) * RANGE * 2;
+        if (isInsideSafeZone(fx, fy)) continue; 
+        
+        let treeType = Math.random() > 0.5 ? 'tree1' : 'tree2';
+        let clusterSize = Math.floor(Math.random() * 8) + 4; 
+        for(let i=0; i<clusterSize; i++) {
+            let tx = fx + (Math.random() - 0.5) * 400; let ty = fy + (Math.random() - 0.5) * 400;
+            sceneParts.push(new ScenePart(treeType, tx, ty));
+        }
+    }
+
+    let scatterConfig = [
+        { type: 'tree3', count: 30 }, { type: 'tree4', count: 30 },
+        { type: 'bush1', count: 40 }, { type: 'bush2', count: 40 },
+        { type: 'grass', count: 100 }, 
+        { type: 'stone1', count: 25 }, { type: 'stone2', count: 20 }, { type: 'stone3', count: 15 },
+        { type: 'car1', count: 2 }, { type: 'car2', count: 2 }, { type: 'car3', count: 2 }, 
+        { type: 'house1', count: 3 }, { type: 'house2', count: 3 }, 
+        { type: 'debris', count: 30 }
+    ];
+
+    scatterConfig.forEach(c => {
+        for(let i=0; i<c.count; i++) {
+            let tx = (Math.random() - 0.5) * RANGE * 2; let ty = (Math.random() - 0.5) * RANGE * 2;
+            if (isInsideSafeZone(tx, ty)) continue; 
+            sceneParts.push(new ScenePart(c.type, tx, ty));
+        }
+    });
+}
+
+/** ==========================================
+ * 6. 初始化与核心逻辑循环
+ * ========================================== */
+let lastTime = performance.now(); 
+
+function initGame() {
+    gameState = 'intro'; player.hasGun = false; 
+    tutorialPhase = 'get_gun'; totalResourcesCollected = 0; wallResourcesCollected = 0; kills = 0;
+    
+    siegeStarted = false; siegeStartTime = 0; bossSpawnedInSiege = false; hordeStartTime = Infinity; 
+    
+    fogSet.clear(); walls = []; sceneParts = []; wallBuildPoint = null; resources = []; zombies = []; bullets = []; damageTexts = [];
+    let hud = document.getElementById('hud-top'); if(hud) hud.style.opacity = '0'; 
+
+    gunDrop = { x: player.x, y: player.y + 900 }; 
+    tower = new Tower(player.x - 250, player.y + 1200, "1号防线"); 
+
+    generateScene(); 
+
+    // NPC 会向下方跑动
+    npcs.push(new NPC(player.x - 80, player.y - 80, true)); 
+    npcs.push(new NPC(player.x + 80, player.y - 120, false));
+    
+    for (let i = 0; i < 8; i++) {
+        let z = new Zombie(player.x + (Math.random()*250 - 125), player.y - 180 - Math.random()*40, 'normal1');
+        z.hp = 10; z.maxHp = 10; z.isInitial = true; z.state = 'chase'; zombies.push(z);
+    }
+    
+    for(let i=0; i<8; i++) {
+        let rx = tower.x + (Math.random() * 1600 - 800);
+        let ry = tower.y + 200 + Math.random() * 1400; 
+        let types = ['wood', 'iron', 'screw']; let type = types[Math.floor(Math.random() * types.length)];
+        resources.push(new Resource(rx, ry, type));
+    }
+}
+
+function spawnZombie(isInitialWave = false, forceSiege = false) {
+    let angle = Math.random() * Math.PI * 2; 
+    let dist = isInitialWave ? (600 + Math.random() * 200) : (Math.max(width, height) / 2 + 200 + Math.random() * 500);
+    let type = forceSiege ? 'siege' : (Math.random() < 0.6 ? 'normal1' : 'normal2');
+    zombies.push(new Zombie(player.x + Math.cos(angle) * dist, player.y + Math.sin(angle) * dist, type));
+}
+
+function spawnResourceNear(originX, originY) {
+    let angle = Math.random() * Math.PI * 2; let dist = 150 + Math.random() * 250; 
+    let types = ['wood', 'iron', 'screw']; let type = types[Math.floor(Math.random() * types.length)];
+    resources.push(new Resource(originX + Math.cos(angle)*dist, originY + Math.sin(angle)*dist, type));
+}
+
+function drawArrowTo(targetX, targetY, text, cx, cy, time) {
+    let angle = Math.atan2(targetY - player.y, targetX - player.x); let dist = Math.hypot(targetX - player.x, targetY - player.y);
+    if (dist > 250) {
+        ctx.save(); ctx.translate(cx, cy); ctx.rotate(angle);
+        let arrowScale = 1 + 0.1 * Math.sin(time / 150); ctx.scale(arrowScale, arrowScale);
+        ctx.fillStyle = 'rgba(0, 255, 200, 0.8)'; ctx.beginPath(); ctx.moveTo(180, -15); ctx.lineTo(180, 15); ctx.lineTo(220, 0); ctx.fill(); 
+        ctx.restore(); ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 36px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(text, cx, 150); ctx.textAlign = 'left';
+    }
+}
+
+function gameLoop(time) {
+    let dt = time - lastTime; lastTime = time; let targets = [player, ...npcs.filter(n => n.hp > 0)]; 
+    if (dt > 100) dt = 16.6; 
+
+    if (performance.now() > alertHideTime) {
+        let alertDiv = document.getElementById('center-alert');
+        if (alertDiv && alertDiv.style.opacity === '1') alertDiv.style.opacity = '0';
+    }
+
+    let pGridX = Math.floor(player.x / FOG_TILE_SIZE); let pGridY = Math.floor(player.y / FOG_TILE_SIZE);
+    let vTiles = Math.ceil(player.visionRadius / FOG_TILE_SIZE);
+    for(let dx = -vTiles; dx <= vTiles; dx++) {
+        for(let dy = -vTiles; dy <= vTiles; dy++) {
+            if (Math.hypot(dx * FOG_TILE_SIZE, dy * FOG_TILE_SIZE) <= player.visionRadius) { fogSet.add(`${pGridX + dx},${pGridY + dy}`); }
+        }
+    }
+
+    if (gameState === 'intro') {
+        joystick.active = true; joystick.vectorX = 0; joystick.vectorY = 1;
+        player.x += joystick.vectorX * player.speed; player.y += joystick.vectorY * player.speed;
+        resolvePhysics(player);
+        npcs.forEach(n => n.update(dt));
+
+        if (gunDrop && Math.hypot(player.x - gunDrop.x, player.y - gunDrop.y) < 60) {
+            gunDrop = null; player.hasGun = true; gameState = 'tutorial'; joystick.active = false; joystick.vectorX = 0; joystick.vectorY = 0;
+            let hud = document.getElementById('hud-top'); if(hud) hud.style.opacity = '1'; 
+        }
+        zombies.forEach(z => z.update(dt, time, targets));
+    }
+
+    if (gameState === 'playing') {
+        if (tutorialPhase === 'kill_2_zombies' && kills >= 2) {
+            tutorialPhase = 'fix_tower1'; showCenterAlert("⚠️ 区域安全！请前往前方修复废弃的防御塔！", "#00ffcc", 5000);
+        }
+        if (tutorialPhase === 'fix_tower1' && tower.state === 'active') {
+            tutorialPhase = 'gather'; showCenterAlert("📡 防御塔启动！扫描到附近有建材，请收集以部署新防线！", "#00ffcc", 5000);
+            for(let i=0; i<8; i++) spawnResourceNear(tower.x, tower.y);
+        }
+        if (tutorialPhase === 'gather' && totalResourcesCollected >= 4) {
+            tutorialPhase = 'build_tower2'; tower2 = new Tower(tower.x + GameConfig.tower2.offsetX, tower.y + GameConfig.tower2.offsetY, "2号防线"); showCenterAlert("📍 资源充足！已解锁新防线建设许可", "#00ffcc", 4000);
+        }
+        if (tutorialPhase === 'build_tower2' && tower2 && tower2.state === 'active' && !gate) {
+            tutorialPhase = 'gather_walls'; gate = new Gate(tower.x, tower.y, tower2.x, tower2.y);
+            showCenterAlert("⛩️ 钢铁大门已启动！新任务：收集物资，准备加固要塞外围！", "#ffcc00", 5000);
+            for(let i=0; i<5; i++) spawnResourceNear(tower.x + 150, tower.y - 75);
+        }
+        if (tutorialPhase === 'gather_walls' && wallResourcesCollected >= 3) {
+            tutorialPhase = 'build_walls'; wallBuildPoint = { x: tower.x - 120, y: tower.y + 60 };
+            showCenterAlert("📍 建材充足！请前往 1号塔 旁边部署要塞围墙", "#00ffcc", 5000);
+        }
+        
+        if (siegeStarted && !bossSpawnedInSiege && performance.now() - siegeStartTime >= 8000) {
+            bossSpawnedInSiege = true;
+            let bossZombie = new Zombie(tower.x - 1200, tower.y - 1200, 'boss');
+            bossZombie.state = 'chase'; 
+            zombies.push(bossZombie);
+            showCenterAlert("☠️ 警告！巨型变异体已加入战场！保卫我们的阵地！", "#800080", 6000);
+        }
+
+        if (performance.now() >= hordeStartTime || tutorialPhase === 'done') {
+            let currentNormalZombies = zombies.filter(z => z.type !== 'boss').length;
+            for (let i = 0; i < 40 - currentNormalZombies; i++) { spawnZombie(false, true); }
+        }
+        
+        if (player.hp > 0) {
+            player.x += joystick.vectorX * player.speed; player.y += joystick.vectorY * player.speed;
+            resolvePhysics(player);
+            if (player.hasGun) {
+                let targetZombie = null; let closestDist = Infinity;
+                for (let z of zombies) {
+                    if (z.hp <= 0) continue;
+                    let d = Math.hypot(z.x - player.x, z.y - player.y);
+                    if (d < player.attackRadius && d < closestDist) { closestDist = d; targetZombie = z; }
+                }
+                if (targetZombie && time - player.lastShotTime > player.shotInterval) { bullets.push(new Bullet(player.x, player.y, targetZombie)); player.lastShotTime = time; }
+            }
+        }
+        
+        for (let i = resources.length - 1; i >= 0; i--) {
+            let res = resources[i]; res.update(dt);
+            let dist = Math.hypot(player.x - res.x, player.y - res.y);
+            if (dist < res.pickupRadius + 40 && player.hp > 0) {
+                player.inventory[res.type] += 3; totalResourcesCollected++;
+                if (tutorialPhase === 'gather_walls') wallResourcesCollected++; 
+                addDamageText(res.x, res.y - 40, "+3", '#ffcc00', null);
+                resources.splice(i, 1);
+            }
+        }
+        
+        let inHealZone = false;
+        [tower, tower2].forEach(t => {
+            if (t) { t.update(dt, time); if (t.state === 'active' && Math.hypot(player.x - t.x, player.y - t.y) <= t.attackRadius) inHealZone = true; }
+        });
+
+        let isRepairingWall = false;
+        for (let w of walls) {
+            if (w.hp < w.maxHp) {
+                let dist = Math.hypot(player.x - w.x, player.y - w.y);
+                if (dist < 150) { 
+                    w.hp += 8 * (dt / 1000);
+                    if (w.hp > w.maxHp) w.hp = w.maxHp;
+                    isRepairingWall = true;
+                    if (Math.random() < 0.05) { addDamageText(w.x + (Math.random()*40-20), w.y - 60, "+1", '#00ff00', '#ffffff'); }
+                }
+            }
+        }
+
+        if (inHealZone && player.hp > 0 && player.hp < player.maxHp) {
+            player.isHealing = true;
+            if (time - player.lastHealTime > 1000) { 
+                player.hp = Math.min(player.maxHp, player.hp + 10); player.lastHealTime = time; 
+                addDamageText(player.x, player.y - 80, "+10", '#00ff00', '#ffffff'); 
+            }
+        } else { player.isHealing = isRepairingWall; }
+
+        if (gate) gate.update(dt); walls.forEach(w => w.update(dt));
+        zombies.forEach(z => z.update(dt, time, targets)); bullets.forEach(b => b.update()); npcs.forEach(n => n.update(dt));
+        
+        let hpPercent = Math.max(0, player.hp) / player.maxHp;
+        let hpColorHUD = hpPercent > 0.5 ? 'linear-gradient(90deg, #00aa55, #00ffaa)' : (hpPercent > 0.2 ? 'linear-gradient(90deg, #cc7700, #ffaa00)' : 'linear-gradient(90deg, #990033, #ff0055)');
+        let hpBarFill = document.getElementById('hp-bar-fill');
+        if (hpBarFill) {
+            hpBarFill.style.width = (hpPercent * 100) + '%'; hpBarFill.style.background = hpColorHUD;
+            document.getElementById('hp-text').innerText = `${Math.max(0, Math.floor(player.hp))}/${player.maxHp}`;
+            document.getElementById('val-wood').innerText = player.inventory.wood; document.getElementById('val-iron').innerText = player.inventory.iron; document.getElementById('val-screw').innerText = player.inventory.screw;
+        }
+    }
+
+    let isMoving = joystick.active && (joystick.vectorX !== 0 || joystick.vectorY !== 0);
+    let isShooting = (time - player.lastShotTime < 300) && player.hasGun;
+    let newState = 'idle';
+    if (isMoving && isShooting) newState = 'move_shoot'; else if (isMoving) newState = 'move'; else if (isShooting) newState = 'shoot'; else newState = 'idle';
+    if (player.state !== newState) { player.state = newState; player.frameX = 0; player.frameTimer = 0; }
+    
+    if (gameState === 'intro') { player.facingRight = true; } else if (isMoving) { player.facingRight = (joystick.vectorX > 0); }
+    if (gameState === 'playing' || gameState === 'intro') { 
+        player.frameTimer += dt;
+        if (player.frameTimer > player.frameInterval) { player.frameX = (player.frameX + 1) % player.framesConfig[player.state]; player.frameTimer = 0; }
+    }
+
+    ctx.clearRect(0, 0, width, height); let cx = width/2, cy = height/2;
+    if (ASSETS.bg.complete && ASSETS.bg.naturalWidth !== 0) {
+        let bgW = ASSETS.bg.width || 512; let bgH = ASSETS.bg.height || 512; let offsetX = (player.x % bgW + bgW) % bgW; let offsetY = (player.y % bgH + bgH) % bgH;
+        for (let x = -offsetX; x < width; x += bgW) { for (let y = -offsetY; y < height; y += bgH) { ctx.drawImage(ASSETS.bg, x, y, bgW, bgH); } }
+    } else {
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 2; let gridSize = 150; let offsetX = (player.x % gridSize + gridSize) % gridSize; let offsetY = (player.y % gridSize + gridSize) % gridSize;
+        ctx.beginPath(); for(let i = -offsetX; i < width; i += gridSize) { ctx.moveTo(i, 0); ctx.lineTo(i, height); }
+        for(let i = -offsetY; i < height; i += gridSize) { ctx.moveTo(0, i); ctx.lineTo(width, i); } ctx.stroke();
+    }
+    
+    [tower, tower2].forEach(t => {
+        if (t && t.state === 'active') {
+            let tGridX = Math.floor(t.x / FOG_TILE_SIZE); let tGridY = Math.floor(t.y / FOG_TILE_SIZE);
+            if (fogSet.has(`${tGridX},${tGridY}`) || gameState === 'intro') {
+                let tx = t.x - player.x + cx; let ty = t.y - player.y + cy; let pulseRadius = t.attackRadius + Math.sin(time/200)*10;
+                ctx.fillStyle = 'rgba(0, 255, 100, 0.05)'; ctx.beginPath(); ctx.arc(tx, ty, t.attackRadius, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = 'rgba(0, 255, 150, 0.3)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(tx, ty, pulseRadius, 0, Math.PI*2); ctx.stroke();
+            }
+        }
+    });
+
+    if (player.hp > 0 && gameState !== 'intro') {
+        ctx.strokeStyle = 'rgba(255, 255, 0, 0.1)'; ctx.beginPath(); ctx.arc(cx, cy, player.aggroRadius, 0, Math.PI*2); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.2)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, player.attackRadius, 0, Math.PI*2); ctx.stroke(); ctx.lineWidth = 1;
+    }
+
+    if (gunDrop) {
+        let gGridX = Math.floor(gunDrop.x / FOG_TILE_SIZE); let gGridY = Math.floor(gunDrop.y / FOG_TILE_SIZE);
+        if (fogSet.has(`${gGridX},${gGridY}`) || gameState === 'intro') {
+            let gx = gunDrop.x - player.x + cx; let gy = gunDrop.y - player.y + cy; let pulse = 20 + Math.sin(time / 150) * 10;
+            ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 20; ctx.fillStyle = '#ffff00'; ctx.beginPath(); ctx.arc(gx, gy, pulse, 0, Math.PI*2); ctx.fill();
+            ctx.shadowBlur = 0; ctx.fillStyle = 'black'; ctx.font = 'bold 24px sans-serif'; ctx.fillText("🔫手枪", gx - 30, gy - 30);
+        }
+    }
+
+    let renderList = [];
+    if (tower) renderList.push({ id: 'tower', obj: tower, y: tower.y + 120 });
+    if (tower2) renderList.push({ id: 'tower2', obj: tower2, y: tower2.y + 120 });
+    if (gate) renderList.push({ id: 'gate', obj: gate, y: Math.max(gate.y1, gate.y2) });
+    
+    sceneParts.forEach(p => renderList.push({ id: 'part', obj: p, y: p.y + p.colOffsetY }));
+    walls.forEach(w => renderList.push({ id: 'wall', obj: w, y: w.y }));
+    if (player.hp > 0) renderList.push({ id: 'player', y: player.y + 40 });
+    npcs.forEach(n => { renderList.push({ id: 'npc', obj: n, y: n.y + 45 }); });
+    zombies.forEach(z => { if (z.hp > 0) renderList.push({ id: 'zombie', obj: z, y: z.y + (z.type==='boss'? z.size*0.875 : 45) }); });
+    resources.forEach(r => { renderList.push({ id: 'resource', obj: r, y: r.y }); });
+
+    renderList.sort((a, b) => a.y - b.y);
+
+    for (let ent of renderList) {
+        if (ent.id === 'tower' || ent.id === 'tower2' || ent.id === 'resource' || ent.id === 'gate' || ent.id === 'wall' || ent.id === 'part') {
+            ent.obj.draw(ent.obj.x - player.x + cx, ent.obj.y - player.y + cy);
+        } else if (ent.id === 'npc' || ent.id === 'zombie') {
+            if (ent.id === 'zombie' && ent.obj.hp <= 0 && ent.obj.type !== 'boss' && !ent.obj.processed) { ent.obj.processed = true; 
+            } else if (ent.obj.hp > 0 || ent.id === 'npc') { ent.obj.draw(ent.obj.x - player.x + cx, ent.obj.y - player.y + cy); }
+        } else if (ent.id === 'player') {
+            let drawX = cx - 64 + player.spriteOffsetX; let drawY = cy - 64 + player.spriteOffsetY;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; ctx.beginPath(); ctx.ellipse(cx, cy + 45, 35, 18, 0, 0, Math.PI*2); ctx.fill();
+
+            if (player.isHealing && gameState === 'playing') {
+                ctx.save(); ctx.translate(cx, cy); let healPulse = 40 + Math.sin(time / 100) * 15;
+                ctx.beginPath(); ctx.arc(0, 0, healPulse, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 255, 100, 0.15)'; ctx.fill(); ctx.strokeStyle = 'rgba(0, 255, 100, 0.6)'; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
+            }
+            if (gameState !== 'intro') {
+                ctx.fillStyle = 'black'; ctx.fillRect(cx - 40, cy - 70 + player.spriteOffsetY, 80, 10);
+                let hpPercent = Math.max(0, player.hp) / player.maxHp; let hpColor = hpPercent > 0.5 ? '#00ffaa' : (hpPercent > 0.2 ? '#ffaa00' : '#ff0055');
+                ctx.fillStyle = hpColor; ctx.fillRect(cx - 39, cy - 69 + player.spriteOffsetY, 78 * hpPercent, 8);
+            }
+
+            let currentImg = ASSETS[`player_${player.state}`]; ctx.save(); ctx.translate(cx, cy); if (!player.facingRight) { ctx.scale(-1, 1); }
+            let flipDrawX = -64 + player.spriteOffsetX; let flipDrawY = -64 + player.spriteOffsetY;
+            
+            if (currentImg.complete && currentImg.naturalWidth !== 0) {
+                let sx = player.frameX * player.spriteWidth;
+                if (sx + player.spriteWidth <= currentImg.naturalWidth && player.spriteHeight <= currentImg.naturalHeight) { ctx.drawImage(currentImg, sx, 0, player.spriteWidth, player.spriteHeight, flipDrawX, flipDrawY, 128, 128); } 
+                else { ctx.fillStyle = '#ff00ff'; ctx.fillRect(-30 + player.spriteOffsetX, -40 + player.spriteOffsetY, 60, 80); }
+            } else {
+                ctx.fillStyle = player.state.includes('shoot') ? '#ff9900' : '#0066ff'; ctx.fillRect(-30 + player.spriteOffsetX, -40 + player.spriteOffsetY, 60, 80);
+                ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(15 + player.spriteOffsetX, -15 + player.spriteOffsetY, 8, 0, Math.PI*2); ctx.fill(); 
+            } ctx.restore();
+        }
+    }
+
+    walls.forEach(w => w.drawHP(w.x - player.x + cx, w.y - player.y + cy));
+
+    for (let i = walls.length - 1; i >= 0; i--) { if (walls[i].hp <= 0) walls.splice(i, 1); }
+    for (let i = zombies.length - 1; i >= 0; i--) { let z = zombies[i]; if (z.hp <= 0) { kills++; zombies.splice(i, 1); } }
+
+    fctx.clearRect(0, 0, width, height); fctx.globalCompositeOperation = 'source-over'; fctx.fillStyle = 'rgba(0, 0, 0, 0.65)'; fctx.fillRect(0, 0, width, height);
+    fctx.globalCompositeOperation = 'destination-out'; fctx.fillStyle = 'rgba(0, 0, 0, 1)'; 
+    let startCol = Math.floor((player.x - width/2) / FOG_TILE_SIZE) - 1; let endCol = Math.ceil((player.x + width/2) / FOG_TILE_SIZE) + 1;
+    let startRow = Math.floor((player.y - height/2) / FOG_TILE_SIZE) - 1; let endRow = Math.ceil((player.y + height/2) / FOG_TILE_SIZE) + 1;
+    for (let c = startCol; c <= endCol; c++) {
+        for (let r = startRow; r <= endRow; r++) {
+            if (fogSet.has(`${c},${r}`)) {
+                let sX = c * FOG_TILE_SIZE - player.x + width/2 + FOG_TILE_SIZE/2; let sY = r * FOG_TILE_SIZE - player.y + height/2 + FOG_TILE_SIZE/2;
+                fctx.beginPath(); fctx.arc(sX, sY, FOG_TILE_SIZE * 0.8, 0, Math.PI * 2); fctx.fill();
+            }
+        }
+    }
+    let grad = fctx.createRadialGradient(cx, cy, player.visionRadius * 0.6, cx, cy, player.visionRadius);
+    grad.addColorStop(0, 'rgba(0,0,0,1)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    fctx.fillStyle = grad; fctx.beginPath(); fctx.arc(cx, cy, player.visionRadius, 0, Math.PI*2); fctx.fill(); ctx.drawImage(fogCanvas, 0, 0);
+
+    for (let i = bullets.length - 1; i >= 0; i--) { let b = bullets[i]; if (b.life <= 0) { bullets.splice(i, 1); continue; } b.draw(b.x - player.x + cx, b.y - player.y + cy); }
+    
+    for (let i = damageTexts.length - 1; i >= 0; i--) {
+        let dtObj = damageTexts[i]; 
+        dtObj.life -= dt; 
+        if (dtObj.life <= 0) { damageTexts.splice(i, 1); continue; }
+        
+        ctx.globalAlpha = Math.max(0, dtObj.life / dtObj.maxLife); 
+        ctx.font = 'bold 36px sans-serif'; 
+        ctx.fillStyle = dtObj.fillColor;
+        
+        let drawX = dtObj.x - player.x + cx;
+        let drawY = dtObj.y - player.y + cy - ((dtObj.maxLife - dtObj.life) / 2000) * 40; 
+        
+        if (dtObj.strokeColor) {
+            ctx.strokeStyle = dtObj.strokeColor;
+            ctx.lineWidth = 4;
+            ctx.strokeText(dtObj.text, drawX, drawY);
+        }
+        ctx.fillText(dtObj.text, drawX, drawY); 
+        ctx.globalAlpha = 1.0;
+    }
+
+    if (gameState === 'playing') {
+        activeTowerToRepair = null;
+        let t1Active = (tutorialPhase === 'fix_tower1' && tower && tower.state === 'broken' && Math.hypot(player.x - tower.x, player.y - tower.y) < 250);
+        let t2Active = (tutorialPhase === 'build_tower2' && tower2 && tower2.state === 'broken' && Math.hypot(player.x - tower2.x, player.y - tower2.y) < 250);
+        let wallActive = (tutorialPhase === 'build_walls' && wallBuildPoint && Math.hypot(player.x - wallBuildPoint.x, player.y - wallBuildPoint.y) < 250);
+
+        let btnX = 0, btnY = 0, btnText = "";
+        if (t1Active) { activeTowerToRepair = tower; btnX = tower.x; btnY = tower.y; btnText = "⚙️ 修复防御塔"; } 
+        else if (t2Active) { activeTowerToRepair = tower2; btnX = tower2.x; btnY = tower2.y; btnText = "⚙️ 部署新防线"; }
+        else if (wallActive) { activeTowerToRepair = 'wall'; btnX = wallBuildPoint.x; btnY = wallBuildPoint.y; btnText = "🧱 部署要塞围墙"; }
+
+        if (activeTowerToRepair) {
+            let screenBtnX = btnX - player.x + cx; let screenBtnY = btnY - player.y + cy + 60; let scale = 1 + Math.sin(time / 150) * 0.03;
+            ctx.save(); ctx.translate(screenBtnX, screenBtnY); ctx.scale(scale, scale);
+            let bw = 240, bh = 60; ctx.fillStyle = '#ff6600'; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 5;
+            ctx.beginPath(); ctx.roundRect(-bw/2, -bh/2, bw, bh, 15); ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 4; ctx.stroke();
+            ctx.shadowBlur = 0; ctx.fillStyle = 'white'; ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(btnText, 0, 0); ctx.restore();
+        }
+
+        if (tutorialPhase === 'kill_2_zombies') {
+            let aliveZombies = zombies.filter(z => z.hp > 0);
+            if(aliveZombies.length > 0) { let nearestZ = aliveZombies.reduce((a, b) => Math.hypot(player.x - a.x, player.y - a.y) < Math.hypot(player.x - b.x, player.y - b.y) ? a : b); drawArrowTo(nearestZ.x, nearestZ.y, `清理周边威胁 (${kills}/2)`, cx, cy, time); }
+        } else if (tutorialPhase === 'fix_tower1' && tower.state === 'broken') { drawArrowTo(tower.x, tower.y, "前往修复防御塔！", cx, cy, time);
+        } else if (tutorialPhase === 'gather') {
+            if (resources.length > 0) { let nearest = resources.reduce((a, b) => Math.hypot(player.x - a.x, player.y - a.y) < Math.hypot(player.x - b.x, player.y - b.y) ? a : b); drawArrowTo(nearest.x, nearest.y, `雷达: 收集建材 (${totalResourcesCollected}/4)`, cx, cy, time);
+            } else { ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 36px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(`正在扫描建材... (${totalResourcesCollected}/4)`, cx, 150); ctx.textAlign = 'left'; }
+        } else if (tutorialPhase === 'build_tower2' && tower2 && tower2.state === 'broken') { drawArrowTo(tower2.x, tower2.y, "前往部署新防线！", cx, cy, time);
+        } else if (tutorialPhase === 'gather_walls') {
+            if (resources.length > 0) { let nearest = resources.reduce((a, b) => Math.hypot(player.x - a.x, player.y - a.y) < Math.hypot(player.x - b.x, player.y - b.y) ? a : b); drawArrowTo(nearest.x, nearest.y, `雷达: 收集建材建墙 (${wallResourcesCollected}/3)`, cx, cy, time); }
+        } else if (tutorialPhase === 'build_walls' && wallBuildPoint) { drawArrowTo(wallBuildPoint.x, wallBuildPoint.y, "前往 1号塔旁 部署要塞围墙！", cx, cy, time); }
+    }
+
+    if (joystick.active && player.hp > 0 && gameState === 'playing') {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)'; ctx.beginPath(); ctx.arc(joystick.startX, joystick.startY, joystick.maxRadius, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'; ctx.beginPath(); ctx.arc(joystick.startX + joystick.vectorX * joystick.maxRadius, joystick.startY + joystick.vectorY * joystick.maxRadius, 40, 0, Math.PI*2); ctx.fill();
+    }
+
+    if (gameState === 'tutorial') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'; ctx.fillRect(0, 0, width, height); ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffff00'; ctx.font = 'bold 80px sans-serif'; ctx.fillText("获得武器: 废土手枪", cx, cy - 200);
+        let alpha = 0.5 + 0.5 * Math.sin(time / 200); ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 55px sans-serif'; ctx.fillText("👇 长按任意位置拖动走位 👇", cx, cy + 150);
+        ctx.fillStyle = 'white'; ctx.font = 'bold 36px sans-serif'; 
+        ctx.fillText("射程极短，走位清剿周围丧尸！", cx, cy + 230);
+        ctx.globalAlpha = 1.0; ctx.textAlign = 'left';
+    }
+    requestAnimationFrame(gameLoop);
+}
+
+initGame(); requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
