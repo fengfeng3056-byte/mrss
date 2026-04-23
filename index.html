@@ -3,10 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>丧尸割草 Demo - 完美骨骼动画版</title>
+    <title>丧尸割草 Demo - 终极稳定重制版</title>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; display: flex; justify-content: center; align-items: center; touch-action: none; font-family: sans-serif; user-select: none; }
-        #game-container { position: relative; width: auto; height: 100vh; aspect-ratio: 1080 / 1920; background-color: #1a1a1a; overflow: hidden; box-shadow: 0 0 30px rgba(255, 255, 255, 0.1); }
+        :root {
+            /* 动态UI缩放因子，由JS接管 */
+            --ui-scale: 1;
+        }
+
+        body, html { 
+            margin: 0; padding: 0; width: 100vw; height: 100vh; 
+            background-color: #000; overflow: hidden; 
+            display: flex; justify-content: center; align-items: center; 
+            touch-action: none; font-family: sans-serif; user-select: none; 
+        }
+        
+        #game-container { 
+            position: relative; 
+            width: 100vw; 
+            height: 100vh; 
+            max-width: calc(100vh * (1080 / 1920)); 
+            max-height: calc(100vw * (1920 / 1080)); 
+            aspect-ratio: 1080 / 1920; 
+            background-color: #1a1a1a; overflow: hidden; 
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.1); 
+            font-size: calc(10px * var(--ui-scale));
+        }
+
         canvas { display: block; width: 100%; height: 100%; }
         
         #loading-screen {
@@ -15,77 +37,81 @@
             display: flex; flex-direction: column; justify-content: center; align-items: center;
             transition: opacity 0.8s ease;
         }
-        #loading-text {
-            color: #00ffcc; font-size: 32px; font-weight: bold; margin-bottom: 20px;
-            text-shadow: 0 0 15px rgba(0, 255, 204, 0.5); letter-spacing: 2px;
+        #loading-text { 
+            color: #00ffcc; font-size: 3.2em; font-weight: bold; margin-bottom: 2em; 
+            text-shadow: 0 0 1.5em rgba(0, 255, 204, 0.5); letter-spacing: 0.2em; 
         }
-        #loading-bar-container {
-            width: 70%; height: 24px; background: #222; border: 3px solid #444; 
-            border-radius: 12px; overflow: hidden; box-shadow: inset 0 0 10px #000;
+        #loading-bar-container { 
+            width: 70%; height: 2.4em; background: #222; border: 0.3em solid #444; 
+            border-radius: 1.2em; overflow: hidden; box-shadow: inset 0 0 1em #000; 
         }
-        #loading-progress {
-            width: 0%; height: 100%; 
-            background: linear-gradient(90deg, #ff0055, #00ffaa); 
-            transition: width 0.1s ease;
-            box-shadow: 0 0 20px rgba(0, 255, 170, 0.6);
+        #loading-progress { 
+            width: 0%; height: 100%; background: linear-gradient(90deg, #ff0055, #00ffaa); 
+            transition: width 0.1s ease; box-shadow: 0 0 2em rgba(0, 255, 170, 0.6); 
         }
 
         #center-alert {
             position: absolute; top: 15%; left: 50%; transform: translateX(-50%);
-            color: #ff0055; font-size: 32px; font-weight: bold; text-shadow: 2px 2px 5px black, 0 0 20px #ff0055;
-            pointer-events: none; z-index: 50; opacity: 0; transition: opacity 0.5s; text-align: center;
-            width: 90%; line-height: 1.4;
+            color: #ff0055; font-size: 3.2em; font-weight: bold; 
+            text-shadow: 0.2em 0.2em 0.5em black, 0 0 2em #ff0055;
+            pointer-events: none; z-index: 50; opacity: 0; transition: opacity 0.5s; 
+            text-align: center; width: 90%; line-height: 1.4;
         }
 
-        #hud-top {
-            position: absolute; top: 20px; left: 20px; right: 20px;
-            display: flex; justify-content: space-between; align-items: flex-start;
+        #hud-top { 
+            position: absolute; top: 2em; left: 2em; right: 2em; 
+            display: flex; justify-content: space-between; align-items: flex-start; 
             z-index: 10; pointer-events: none; transition: opacity 0.5s; opacity: 0; 
         }
-        #player-profile {
-            display: flex; align-items: center; background: rgba(0, 0, 0, 0.6);
-            padding: 8px 15px 8px 8px; border-radius: 50px; border: 2px solid #555; backdrop-filter: blur(4px);
+        #player-profile { 
+            display: flex; align-items: center; background: rgba(0, 0, 0, 0.6); 
+            padding: 0.8em 1.5em 0.8em 0.8em; border-radius: 5em; border: 0.2em solid #555; backdrop-filter: blur(4px); 
         }
-        #avatar-box {
-            width: 64px; height: 64px; border-radius: 50%; overflow: hidden;
-            border: 3px solid #00ccff; background: #333; flex-shrink: 0;
-            display: flex; justify-content: center; align-items: center; font-size: 24px;
+        #avatar-box { 
+            width: 6.4em; height: 6.4em; border-radius: 50%; overflow: hidden; 
+            border: 0.3em solid #00ccff; background: #333; flex-shrink: 0; 
+            display: flex; justify-content: center; align-items: center; font-size: 2.4em; 
         }
         #avatar-box img { width: 100%; height: 100%; object-fit: cover; }
-        #profile-info { margin-left: 12px; display: flex; flex-direction: column; }
-        #player-name { color: white; font-size: 20px; font-weight: bold; text-shadow: 1px 1px 2px black; margin-bottom: 4px; }
-        #hp-bar-container {
-            width: 150px; height: 18px; background: #222; border-radius: 10px;
-            border: 2px solid #000; position: relative; overflow: hidden; box-shadow: inset 0 2px 5px rgba(0,0,0,0.8);
+        #profile-info { margin-left: 1.2em; display: flex; flex-direction: column; }
+        #player-name { 
+            color: white; font-size: 2em; font-weight: bold; 
+            text-shadow: 0.1em 0.1em 0.2em black; margin-bottom: 0.4em; 
+        }
+        #hp-bar-container { 
+            width: 15em; height: 1.8em; background: #222; border-radius: 1em; 
+            border: 0.2em solid #000; position: relative; overflow: hidden; 
+            box-shadow: inset 0 0.2em 0.5em rgba(0,0,0,0.8); 
         }
         #hp-bar-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #ff0055, #00ffaa); transition: width 0.2s ease-out, background 0.3s; }
-        #hp-text {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            display: flex; justify-content: center; align-items: center;
-            color: white; font-size: 12px; font-weight: bold; text-shadow: 1px 1px 1px black;
+        #hp-text { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            display: flex; justify-content: center; align-items: center; 
+            color: white; font-size: 1.2em; font-weight: bold; text-shadow: 0.1em 0.1em 0.1em black; 
         }
 
-        #resource-panel { display: flex; gap: 10px; flex-direction: column; align-items: flex-end; }
-        .res-item {
-            display: flex; align-items: center; background: rgba(0, 0, 0, 0.6);
-            padding: 5px 15px 5px 5px; border-radius: 30px; border: 2px solid #555; backdrop-filter: blur(4px);
+        #resource-panel { display: flex; gap: 1em; flex-direction: column; align-items: flex-end; }
+        .res-item { 
+            display: flex; align-items: center; background: rgba(0, 0, 0, 0.6); 
+            padding: 0.5em 1.5em 0.5em 0.5em; border-radius: 3em; border: 0.2em solid #555; backdrop-filter: blur(4px); 
         }
-        .res-icon {
-            width: 36px; height: 36px; border-radius: 50%; background: #444;
-            display: flex; justify-content: center; align-items: center; margin-right: 10px;
-            font-size: 20px; border: 2px solid #888; overflow: hidden;
+        .res-icon { 
+            width: 3.6em; height: 3.6em; border-radius: 50%; background: #444; 
+            display: flex; justify-content: center; align-items: center; 
+            margin-right: 1em; font-size: 2em; border: 0.2em solid #888; overflow: hidden; 
         }
         .res-icon img { width: 100%; height: 100%; object-fit: contain; }
-        .res-value { color: white; font-size: 22px; font-weight: bold; text-shadow: 1px 1px 2px black; min-width: 40px; text-align: right; }
+        .res-value { 
+            color: white; font-size: 2.2em; font-weight: bold; 
+            text-shadow: 0.1em 0.1em 0.2em black; min-width: 4em; text-align: right; 
+        }
     </style>
 </head>
 <body>
     <div id="game-container">
         <div id="loading-screen">
             <div id="loading-text">资源加载中 0%</div>
-            <div id="loading-bar-container">
-                <div id="loading-progress"></div>
-            </div>
+            <div id="loading-bar-container"><div id="loading-progress"></div></div>
         </div>
 
         <div id="center-alert"></div>
@@ -108,7 +134,7 @@
 
 <script>
 /** ==========================================
- * 0. 游戏全局配置 
+ * 游戏配置与预加载中心
  * ========================================== */
 const GameConfig = {
     tower2: { offsetX: 300, offsetY: -150 },
@@ -139,7 +165,6 @@ const PART_TYPES = {
     debris:{ colRadius: 0,  colOffsetY: 0 }  
 };
 
-// 【资源注册】：包含所有独立的序列帧
 const ASSETS = {};
 const assetPaths = {
     player_idle: './player_idle.png', player_move: './player_move.png',
@@ -151,24 +176,21 @@ const assetPaths = {
     res_wood: './res_wood.png', res_iron: './res_iron.png', res_screw: './res_screw.png',
     wall1_idle: './wall1_idle.png', wall1_hit: './wall1_hit.png',
     wall2_idle: './wall2_idle.png', wall2_hit: './wall2_hit.png',
-    
     // 丧尸1与攻城丧尸的所有动作序列帧
     zombie1_idle: './zombie1_idle.png', 
     zombie1_run: './zombie1_run.png',
-    zombie1_move_attack: './zombie1_move_attack.png', 
-    zombie1_stay_attack: './zombie1_stay_attack.png',
-    zombie1_death: './zombie1_death.png', 
-    zombie1_dead_idle: './zombie1_dead_idle.png'
+    zombie1_stay_attack: './zombie1_stay_attack.png', // 原地挠墙 6帧
+    zombie1_move_attack: './zombie1_move_attack.png', // 移动咬人 8帧
+    zombie1_death: './zombie1_death.png',             // 倒地过程 7帧
+    zombie1_dead_idle: './zombie1_dead_idle.png'      // 彻底死亡 1帧
 };
+
 for(let key in PART_TYPES) { assetPaths[key] = `./${key}.png`; }
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const width = 1080; const height = 1920;
 canvas.width = width; canvas.height = height;
-
-if (!ctx.roundRect) { ctx.roundRect = function(x, y, w, h, r) { this.rect(x, y, w, h); return this; } }
-if (!ctx.ellipse) { ctx.ellipse = function(x, y, rx, ry, rot, sa, ea) { this.save(); this.translate(x, y); this.rotate(rot); this.scale(rx, ry); this.arc(0, 0, 1, sa, ea); this.restore(); } }
 
 const fogCanvas = document.createElement('canvas'); fogCanvas.width = width; fogCanvas.height = height;
 const fctx = fogCanvas.getContext('2d');
@@ -201,10 +223,11 @@ function showCenterAlert(text, color, durationMs) {
     }
 }
 
+// UI 飘字系统：支持独立的填充色和描边色
 function addDamageText(x, y, text, fillColor, strokeColor) {
     damageTexts.push({
         x: x, y: y, text: text,
-        life: 2000, maxLife: 2000, 
+        life: 2000, maxLife: 2000, // 统一存活 2 秒
         fillColor: fillColor, strokeColor: strokeColor
     });
 }
@@ -258,12 +281,11 @@ function resolvePhysics(entity) {
         }
     }
     
-    if (entity.type && isBlocked) return true;
-    return false;
+    return isBlocked;
 }
 
 /** ==========================================
- * 实体类定义 
+ * 核心对象定义
  * ========================================== */
 class WallBuilder {
     constructor(x, y) {
@@ -344,16 +366,21 @@ class WallBuilder {
 
 class ScenePart {
     constructor(type, x, y) {
-        this.type = type; this.x = x; this.y = y; this.config = PART_TYPES[type]; this.scale = 2.0;
-        this.colRadius = this.config.colRadius * this.scale; this.colOffsetY = this.config.colOffsetY * this.scale;
+        this.type = type; this.x = x; this.y = y;
+        this.config = PART_TYPES[type];
+        this.scale = 2.0;
+        this.colRadius = this.config.colRadius * this.scale;
+        this.colOffsetY = this.config.colOffsetY * this.scale;
     }
     draw(screenX, screenY) {
         let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
 
-        let img = ASSETS[this.type]; ctx.save();
+        let img = ASSETS[this.type];
+        ctx.save();
         if (img && img.complete && img.naturalWidth !== 0) {
-            let nw = img.naturalWidth * this.scale; let nh = img.naturalHeight * this.scale; 
+            let nw = img.naturalWidth * this.scale; 
+            let nh = img.naturalHeight * this.scale;
             ctx.drawImage(img, screenX - nw/2, screenY - nh, nw, nh);
         } else {
             let fallbackSize = this.colRadius > 0 ? this.colRadius * 2 : 40 * this.scale;
@@ -365,46 +392,77 @@ class ScenePart {
 }
 
 class Resource {
-    constructor(x, y, type) { this.x = x; this.y = y; this.type = type; this.size = 60; this.pickupRadius = 60; }
+    constructor(x, y, type) {
+        this.x = x; this.y = y; this.type = type; 
+        this.size = 60; this.pickupRadius = 60;
+    }
     update(dt) {} 
     draw(screenX, screenY) {
         let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
 
-        let img = ASSETS['res_' + this.type]; ctx.save(); ctx.shadowColor = '#fffacd'; ctx.shadowBlur = 4;
-        if (img && img.complete && img.naturalWidth !== 0) { ctx.drawImage(img, screenX - this.size/2, screenY - this.size/2, this.size, this.size);
-        } else { ctx.fillStyle = this.type === 'wood' ? '#8b5a2b' : (this.type === 'iron' ? '#b0c4de' : '#a9a9a9'); ctx.beginPath(); ctx.arc(screenX, screenY, this.size/2, 0, Math.PI*2); ctx.fill(); }
+        let img = ASSETS['res_' + this.type];
+        ctx.save(); ctx.shadowColor = '#fffacd'; ctx.shadowBlur = 4;
+        if (img && img.complete && img.naturalWidth !== 0) {
+            ctx.drawImage(img, screenX - this.size/2, screenY - this.size/2, this.size, this.size);
+        } else {
+            ctx.fillStyle = this.type === 'wood' ? '#8b5a2b' : (this.type === 'iron' ? '#b0c4de' : '#a9a9a9');
+            ctx.beginPath(); ctx.arc(screenX, screenY, this.size/2, 0, Math.PI*2); ctx.fill(); 
+        }
         ctx.restore();
     }
 }
 
 class WallSegment {
     constructor(x, y, flipX) {
-        this.x = x; this.y = y; this.flipX = flipX; this.scale = 1.8; this.radius = 32 * this.scale; 
-        this.imgType = Math.random() > 0.5 ? 1 : 2; this.hp = 300; this.maxHp = 300;
-        this.state = 'idle'; this.frameX = 0; this.frameTimer = 0; this.frameInterval = 100;
+        this.x = x; this.y = y; 
+        this.flipX = flipX; 
+        this.scale = 1.8; 
+        this.radius = 32 * this.scale; 
+        this.imgType = Math.random() > 0.5 ? 1 : 2; 
+        this.hp = 300; this.maxHp = 300;
+        
+        this.state = 'idle'; 
+        this.frameX = 0; this.frameTimer = 0; this.frameInterval = 100;
     }
+    
     update(dt) {
         if (this.state === 'hit') {
             this.frameTimer += dt;
             if (this.frameTimer > this.frameInterval) {
-                this.frameX++; if (this.frameX >= 2) { this.state = 'idle'; this.frameX = 0; }
+                this.frameX++;
                 this.frameTimer = 0;
+                if (this.frameX >= 2) { 
+                    this.state = 'idle';
+                    this.frameX = 0;
+                }
             }
         }
     } 
+    
     draw(screenX, screenY) {
         let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
 
-        let imgKey = `wall${this.imgType}_${this.state}`; let img = ASSETS[imgKey]; let downOffset = 22; 
-        ctx.save(); ctx.translate(screenX, screenY); if (this.flipX) ctx.scale(-1, 1); ctx.scale(this.scale, this.scale); 
-        
-        if (img && img.complete && img.naturalWidth !== 0) {
-            let spriteW = img.naturalWidth / (this.state === 'hit' ? 2 : 1);
-            ctx.drawImage(img, this.frameX * spriteW, 0, spriteW, img.naturalHeight, -64, -100 + downOffset, 128, 128);
+        let imgKey = `wall${this.imgType}_${this.state}`;
+        let img = ASSETS[imgKey];
+        let downOffset = 22; 
+
+        ctx.save(); 
+        ctx.translate(screenX, screenY); 
+        if (this.flipX) ctx.scale(-1, 1); 
+        ctx.scale(this.scale, this.scale); 
+
+        if (img && img.complete && img.naturalWidth !== 0) { 
+            let frameCount = this.state === 'hit' ? 2 : 1;
+            let spriteW = img.naturalWidth / frameCount;
+            let spriteH = img.naturalHeight;
+            // 为避免越界，做安全取余
+            let safeFrame = this.frameX % frameCount;
+            ctx.drawImage(img, safeFrame * spriteW, 0, spriteW, spriteH, -64, -100 + downOffset, 128, 128);
         } else {
-            ctx.fillStyle = this.state === 'hit' ? '#cc3333' : '#555'; ctx.fillRect(-32, -64 + downOffset, 64, 64);
+            ctx.fillStyle = this.state === 'hit' ? '#cc3333' : '#555'; 
+            ctx.fillRect(-32, -64 + downOffset, 64, 64); 
             ctx.strokeStyle = '#222'; ctx.lineWidth = 3; ctx.strokeRect(-32, -64 + downOffset, 64, 64);
             ctx.fillStyle = '#666'; ctx.fillRect(-32, -64 + downOffset, 64, 8); 
             ctx.beginPath(); ctx.moveTo(-32, -32 + downOffset); ctx.lineTo(32, -32 + downOffset); ctx.stroke(); 
@@ -412,13 +470,17 @@ class WallSegment {
         }
         ctx.restore();
     }
+    
     drawHP(screenX, screenY) {
         let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
 
-        let hpY = -120 - 40; ctx.save(); ctx.translate(screenX, screenY);
+        let hpY = -120 - 40; 
+        ctx.save();
+        ctx.translate(screenX, screenY);
         if (this.hp < this.maxHp) {
-            ctx.fillStyle = '#000'; ctx.fillRect(-32, hpY - 2, 64, 10); ctx.fillStyle = '#ff0000'; ctx.fillRect(-31, hpY - 1, 62, 8); 
+            ctx.fillStyle = '#000'; ctx.fillRect(-32, hpY - 2, 64, 10); 
+            ctx.fillStyle = '#ff0000'; ctx.fillRect(-31, hpY - 1, 62, 8); 
             ctx.fillStyle = '#00ffaa'; ctx.fillRect(-31, hpY - 1, 62 * Math.max(0, this.hp / this.maxHp), 8); 
         }
         ctx.restore();
@@ -426,57 +488,81 @@ class WallSegment {
 }
 
 class Gate {
-    constructor(x1, y1, x2, y2) { this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2; this.openProgress = 0; this.thickness = 40; this.locked = false; }
+    constructor(x1, y1, x2, y2) {
+        this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2;
+        this.openProgress = 0; this.thickness = 40;
+        this.locked = false; 
+    }
     update(dt) {
         let distToPlayer = this.distToSegment(player.x, player.y);
-        let dx = this.x2 - this.x1; let dy = this.y2 - this.y1; let len = Math.hypot(dx, dy); let nx = -dy / len; let ny = dx / len; 
+        
+        let dx = this.x2 - this.x1; let dy = this.y2 - this.y1; let len = Math.hypot(dx, dy);
+        let nx = -dy / len; let ny = dx / len; 
         let dot = (player.x - this.x1) * nx + (player.y - this.y1) * ny;
 
         if (siegeStarted && !this.locked) {
-            if (dot > 80 && distToPlayer > 80) { this.locked = true; showCenterAlert("🔒 要塞大门已锁死！准备迎战！", "#ffcc00", 3000); }
+            if (dot > 80 && distToPlayer > 80) {
+                this.locked = true;
+                showCenterAlert("🔒 要塞大门已锁死！准备迎战！", "#ffcc00", 3000);
+            }
         }
 
-        if (!this.locked && distToPlayer < 250) { this.openProgress = Math.min(1, this.openProgress + dt / 300); } 
-        else { this.openProgress = Math.max(0, this.openProgress - dt / 300); }
+        if (!this.locked && distToPlayer < 250) { 
+            this.openProgress = Math.min(1, this.openProgress + dt / 300); 
+        } else { 
+            this.openProgress = Math.max(0, this.openProgress - dt / 300); 
+        }
 
         if (siegeStarted && this.locked) {
             let hasActiveZombies = zombies.some(z => z.hp > 0 && (z.type === 'siege' || z.type === 'boss'));
-            if (!hasActiveZombies && bossSpawnedInSiege) { this.locked = false; }
+            if (!hasActiveZombies && bossSpawnedInSiege) {
+                this.locked = false;
+            }
         }
     }
     distToSegment(px, py) {
-        let l2 = Math.pow(this.x2 - this.x1, 2) + Math.pow(this.y2 - this.y1, 2); if (l2 === 0) return Math.hypot(px - this.x1, py - this.y1);
+        let l2 = Math.pow(this.x2 - this.x1, 2) + Math.pow(this.y2 - this.y1, 2);
+        if (l2 === 0) return Math.hypot(px - this.x1, py - this.y1);
         let t = Math.max(0, Math.min(1, ((px - this.x1) * (this.x2 - this.x1) + (py - this.y1) * (this.y2 - this.y1)) / l2));
-        let projX = this.x1 + t * (this.x2 - this.x1); let projY = this.y1 + t * (this.y2 - this.y1); return Math.hypot(px - projX, py - projY);
+        let projX = this.x1 + t * (this.x2 - this.x1); let projY = this.y1 + t * (this.y2 - this.y1);
+        return Math.hypot(px - projX, py - projY);
     }
     draw(screenXOffset, screenYOffset) {
         let midWorldX = (this.x1 + this.x2)/2; let midWorldY = (this.y1 + this.y2)/2;
         let gridX = Math.floor(midWorldX / FOG_TILE_SIZE); let gridY = Math.floor(midWorldY / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`)) return;
 
-        let sx1 = this.x1 - player.x + width/2; let sy1 = this.y1 - player.y + height/2; let sx2 = this.x2 - player.x + width/2; let sy2 = this.y2 - player.y + height/2;
+        let sx1 = this.x1 - player.x + width/2; let sy1 = this.y1 - player.y + height/2;
+        let sx2 = this.x2 - player.x + width/2; let sy2 = this.y2 - player.y + height/2;
         let midX = (sx1 + sx2) / 2; let midY = (sy1 + sy2) / 2;
 
         ctx.save(); ctx.strokeStyle = '#222'; ctx.lineWidth = this.thickness; ctx.lineCap = 'butt';
-        let fullDist = Math.hypot(sx2-sx1, sy2-sy1); let gapWidth = (fullDist / 2 - 20) * this.openProgress; 
-        let angle = Math.atan2(sy2 - sy1, sx2 - sx1); let dx = Math.cos(angle); let dy = Math.sin(angle);
+        let fullDist = Math.hypot(sx2-sx1, sy2-sy1);
+        let gapWidth = (fullDist / 2 - 20) * this.openProgress; 
+        let angle = Math.atan2(sy2 - sy1, sx2 - sx1);
+        let dx = Math.cos(angle); let dy = Math.sin(angle);
         
-        let d1EndX = midX - dx * gapWidth; let d1EndY = midY - dy * gapWidth; let d2StartX = midX + dx * gapWidth; let d2StartY = midY + dy * gapWidth;
+        let d1EndX = midX - dx * gapWidth; let d1EndY = midY - dy * gapWidth;
+        let d2StartX = midX + dx * gapWidth; let d2StartY = midY + dy * gapWidth;
 
         ctx.beginPath(); ctx.moveTo(sx1, sy1); ctx.lineTo(d1EndX, d1EndY); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(d2StartX, d2StartY); ctx.stroke();
         
-        ctx.strokeStyle = this.locked ? '#ff0000' : '#00ffcc'; ctx.lineWidth = 15; ctx.shadowColor = this.locked ? '#ff0000' : '#00ffcc'; ctx.shadowBlur = 20;
+        ctx.strokeStyle = this.locked ? '#ff0000' : '#00ffcc'; 
+        ctx.lineWidth = 15; ctx.shadowColor = this.locked ? '#ff0000' : '#00ffcc'; ctx.shadowBlur = 20;
         if(this.openProgress > 0.1 && !this.locked) { ctx.strokeStyle = '#ffcc00'; ctx.shadowColor = '#ffcc00'; } 
         ctx.beginPath(); ctx.moveTo(sx1, sy1); ctx.lineTo(d1EndX, d1EndY); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(d2StartX, d2StartY); ctx.stroke(); ctx.restore();
+        ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(d2StartX, d2StartY); ctx.stroke();
+        ctx.restore();
     }
 }
 
 class Tower {
     constructor(x, y, label) {
-        this.x = x; this.y = y; this.state = 'broken'; this.label = label || "防御塔"; this.repairTimer = 0; this.repairTimeMax = 2000; 
-        this.attackRadius = 500; this.lastShotTime = 0; this.shotInterval = 800; this.size = 100; this.imgWidth = 256; this.imgHeight = 512;
+        this.x = x; this.y = y; this.state = 'broken'; this.label = label || "防御塔";
+        this.repairTimer = 0; this.repairTimeMax = 2000; 
+        this.attackRadius = 500; this.lastShotTime = 0; this.shotInterval = 800; 
+        this.size = 100; this.imgWidth = 256; this.imgHeight = 512;
         this.showEffect = false; this.effectRadius = 0;
     }
     update(dt, time) {
@@ -512,17 +598,22 @@ class Tower {
             ctx.drawImage(img, drawX, drawY, this.imgWidth, this.imgHeight);
             if (this.state === 'broken') {
                 ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = 0.3 + Math.sin(Date.now()/200)*0.2;
-                ctx.drawImage(img, drawX, drawY, this.imgWidth, this.imgHeight); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1.0;
+                ctx.drawImage(img, drawX, drawY, this.imgWidth, this.imgHeight);
+                ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1.0;
             }
         } else {
             ctx.fillStyle = this.state === 'active' ? '#00ccff' : '#555555'; ctx.fillRect(drawX, drawY, this.imgWidth, this.imgHeight);
-            if (this.state === 'active') { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(screenX, screenY - 200, 30, 0, Math.PI*2); ctx.fill(); ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 40; ctx.fill(); ctx.shadowBlur = 0; }
+            if (this.state === 'active') {
+                ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(screenX, screenY - 200, 30, 0, Math.PI*2); ctx.fill();
+                ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 40; ctx.fill(); ctx.shadowBlur = 0;
+            }
         }
         ctx.globalAlpha = 1.0; 
 
         if (this.showEffect) {
             this.effectRadius += 25; let effectAlpha = Math.max(0, 1 - this.effectRadius / 800);
-            ctx.strokeStyle = `rgba(0, 255, 200, ${effectAlpha})`; ctx.lineWidth = 15; ctx.beginPath(); ctx.arc(screenX, screenY, this.effectRadius, 0, Math.PI*2); ctx.stroke();
+            ctx.strokeStyle = `rgba(0, 255, 200, ${effectAlpha})`; ctx.lineWidth = 15;
+            ctx.beginPath(); ctx.arc(screenX, screenY, this.effectRadius, 0, Math.PI*2); ctx.stroke();
             ctx.fillStyle = `rgba(255, 255, 255, ${effectAlpha})`; ctx.beginPath(); ctx.arc(screenX, screenY - 200, this.effectRadius/4, 0, Math.PI*2); ctx.fill();
             if (this.effectRadius > 800) this.showEffect = false;
         }
@@ -574,45 +665,34 @@ class NPC {
 }
 
 /** ==========================================
- * 丧尸类：完美状态机与尸体系统
+ * 丧尸类：完美的骨骼动画与尸体系统
  * ========================================== */
 class Zombie {
     constructor(x, y, type) {
         this.x = x; this.y = y; this.type = type; 
+        this.hp = (type==='siege'?30:(type==='boss'?300:10)); this.maxHp = this.hp;
         
-        // 【核心状态】：idle, run, move_attack, stay_attack, death, dead_idle
+        // 核心状态：idle, run, move_attack, stay_attack, death, dead_idle
         this.state = 'idle'; 
         this.frameX = 0; this.frameTimer = 0; this.frameInterval = 100; 
         this.facingRight = true;
         this.isInitial = false; 
-        this.isDeadCounted = false; 
+        this.isDeadCounted = false; // 用于统计击杀，保留尸体
         
-        this.aggroRadius = 800; 
+        this.aggroRadius = (type==='siege'||type==='boss') ? Infinity : 800;
         this.targetWall = null; 
         this.wanderVec = {x: 0, y: 0}; this.stateTimer = 0; this.lastAttackTime = 0;
         
-        if (type === 'boss') { 
-            this.hp = 300; this.maxHp = 300; this.baseSpeed = 1.0; this.chaseSpeed = 2.0; this.size = 120; this.minDmg = 10; this.maxDmg = 20; this.attackInterval = 1500; 
-            this.aggroRadius = Infinity; 
-        } 
-        else if (type === 'siege') {
-            this.hp = 30; this.maxHp = 30; this.baseSpeed = 2.0; this.chaseSpeed = 3.5; this.size = 50; this.minDmg = 5; this.maxDmg = 8; 
-            this.attackInterval = 1000; 
-            this.aggroRadius = Infinity; 
-        }
-        else if (type === 'normal2') { 
-            this.hp = 50; this.maxHp = 50; this.baseSpeed = 1.5; this.chaseSpeed = 3.0; this.size = 60; this.minDmg = 5; this.maxDmg = 8; this.attackInterval = 1000; 
-        } 
-        else { 
-            this.hp = 10; this.maxHp = 10; this.baseSpeed = 2.0; this.chaseSpeed = 3.5; this.size = 50; this.minDmg = 5; this.maxDmg = 8; this.attackInterval = 1000; 
-        }
+        this.baseSpeed = (type==='boss'?1.0:2.0); this.chaseSpeed = (type==='boss'?2.0:3.5); this.size = (type==='boss'?120:50);
+        this.minDmg = 5; this.maxDmg = 8; this.attackInterval = (type==='siege'?1000:(type==='boss'?1500:1000));
+        if(type === 'boss') { this.minDmg = 10; this.maxDmg = 20; }
     }
 
     update(dt, time, targets) {
-        // 如果已经是停滞尸体，则什么都不做
+        // 如果已经是停滞的尸体，直接返回，不再参与任何计算
         if (this.state === 'dead_idle') return;
 
-        // 【核心拦截】：处理HP归零
+        // 【死亡逻辑拦截】
         if (this.hp <= 0) {
             if (this.type === 'siege' || this.type === 'normal1') {
                 if (this.state !== 'death') { 
@@ -626,7 +706,7 @@ class Zombie {
             }
         }
 
-        // 更新动画序列帧
+        // 【状态序列帧驱动】
         this.frameTimer += dt;
         let drawState = this.state === 'chase' || this.state === 'wander' ? 'run' : this.state;
         let frameLimits = { 'idle': 1, 'run': 5, 'move_attack': 8, 'stay_attack': 6, 'death': 7, 'dead_idle': 1 };
@@ -636,9 +716,9 @@ class Zombie {
             this.frameX++;
             if (this.frameX >= currentLimit) {
                 if (this.state === 'death') {
-                    this.state = 'dead_idle'; 
+                    this.state = 'dead_idle'; // 死亡动画播完后进入彻底死透待机
                     this.frameX = 0;
-                    return; // 【防粘连】：动画播放完变成尸体后立即停止
+                    return; // 防止下面继续执行逻辑
                 } else if (this.state.includes('attack')) {
                     this.state = 'chase'; 
                     this.frameX = 0;
@@ -649,13 +729,12 @@ class Zombie {
             this.frameTimer = 0;
         }
 
-        // 死亡倒地或攻击硬直期间，不进行寻路和移动
+        // 在死亡或攻击的硬直动画期间，锁死AI寻路与移动
         if (this.state === 'death' || this.state.includes('attack')) return;
 
         let targetX = player.x; let targetY = player.y; let targetEntity = player;
         let isTargetingWall = false;
 
-        // 攻城寻路优先级
         if (this.type === 'siege') {
             if (!this.targetWall || this.targetWall.hp <= 0) {
                 if (walls.length > 0) { this.targetWall = walls[Math.floor(Math.random() * walls.length)]; } 
@@ -679,6 +758,7 @@ class Zombie {
         }
 
         let distToTarget = Math.hypot(targetX - this.x, targetY - this.y);
+        
         if (!isTargetingWall && distToTarget > 3000 && this.type !== 'boss' && this.type !== 'siege' && gameState === 'playing') { this.hp = 0; return; }
         
         if (distToTarget < this.aggroRadius || isTargetingWall) { this.state = 'chase'; } else if (this.state === 'chase') { this.state = 'idle'; }
@@ -697,10 +777,9 @@ class Zombie {
         } 
         else if (this.state === 'wander') { this.x += this.wanderVec.x * this.baseSpeed; this.y += this.wanderVec.y * this.baseSpeed; }
 
-        // 单位互相排斥
         let repulseX = 0; let repulseY = 0;
         for (let other of zombies) {
-            if (other === this || other.hp <= 0 || other.state === 'dead_idle') continue;
+            if (other === this || other.hp <= 0 || other.state === 'dead_idle') continue; // 忽略尸体排斥
             let dx = this.x - other.x; let dy = this.y - other.y; let dist = Math.hypot(dx, dy);
             let overlapDist = (this.size + other.size) * 0.7; 
             if (dist > 0 && dist < overlapDist) {
@@ -711,7 +790,7 @@ class Zombie {
 
         let isPhysicallyBlocked = resolvePhysics(this); 
 
-        // 【触发墙壁攻击 -> 原地攻击】
+        // 【判定：被墙卡住 -> 原地攻击】
         if (isPhysicallyBlocked && this.state === 'chase') {
             let hitWall = null; let closestWallDist = Infinity;
             for (let w of walls) {
@@ -720,20 +799,22 @@ class Zombie {
             }
             if (hitWall && time - this.lastAttackTime > this.attackInterval) {
                 this.state = 'stay_attack'; this.frameX = 0; this.frameTimer = 0;
-                hitWall.hp -= 3; hitWall.state = 'hit'; hitWall.frameX = 0; hitWall.frameTimer = 0;
-                this.lastAttackTime = time;
-                addDamageText(hitWall.x, hitWall.y - 60, "-3", '#ff0000', '#ffffff');
+                hitWall.hp -= 3; hitWall.state = 'hit'; hitWall.frameX = 0; this.lastAttackTime = time;
+                addDamageText(hitWall.x, hitWall.y - 60, "-3", '#ff0000', '#ffffff'); // 墙受击：红底白边
             }
         }
 
-        // 【触发咬人攻击 -> 移动攻击】
+        // 【判定：贴近目标 -> 移动攻击】
         if (!isTargetingWall) {
             let tSize = targetEntity.size || 50; 
             if (distToTarget < this.size + tSize && time - this.lastAttackTime > this.attackInterval) {
                 this.state = 'move_attack'; this.frameX = 0; this.frameTimer = 0;
                 let dmg = Math.floor(Math.random() * (this.maxDmg - this.minDmg + 1)) + this.minDmg; 
                 targetEntity.hp -= dmg; this.lastAttackTime = time;
-                addDamageText(targetEntity.x, targetEntity.y - 80, `-${dmg}`, '#ff0000', '#ffffff');
+                addDamageText(targetEntity.x, targetEntity.y - 80, `-${dmg}`, '#ff0000', '#ffffff'); // 玩家受击：红底白边
+                if (targetEntity !== player && targetEntity.hp <= 0) { 
+                    addDamageText(targetEntity.x, targetEntity.y, `啊啊啊...`, '#ff0000', '#ffffff');
+                }
             }
         }
     }
@@ -745,13 +826,13 @@ class Zombie {
         let s = this.size * 2.5; let shadowYOffset = this.type === 'boss' ? s * 0.35 : 45;
         let shadowRadiusX = this.type === 'boss' ? 70 : 35; let shadowRadiusY = this.type === 'boss' ? 35 : 18;
         
-        // 活物绘制阴影与血条
+        // 尸体不画阴影和血条
         if (this.state !== 'dead_idle') {
             ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; ctx.beginPath(); ctx.ellipse(screenX, screenY + shadowYOffset, shadowRadiusX, shadowRadiusY, 0, 0, Math.PI*2); ctx.fill();
             if (this.hp > 0 && gameState !== 'intro') {
                 let barWidth = this.type === 'boss' ? 200 : 80; let barOffset = this.type === 'boss' ? 100 : 60;
                 ctx.fillStyle = 'red'; ctx.fillRect(screenX - barWidth/2, screenY - barOffset, barWidth, 8);
-                ctx.fillStyle = '#0f0'; ctx.fillRect(screenX - barWidth/2, screenY - barOffset, barWidth * (this.hp/this.maxHp), 8);
+                ctx.fillStyle = '#0f0'; ctx.fillRect(screenX - barWidth/2, screenY - barOffset, barWidth * (Math.max(0,this.hp)/this.maxHp), 8);
             }
         }
 
@@ -767,7 +848,8 @@ class Zombie {
                 let maxFrames = frameLimits[drawState] || 1;
                 let spriteW = img.naturalWidth / maxFrames; 
                 let spriteH = img.naturalHeight;
-                ctx.drawImage(img, this.frameX * spriteW, 0, spriteW, spriteH, -s/2, -s/2, s, s);
+                let safeFrame = this.frameX % maxFrames; // 安全索引，防止切换瞬间越界
+                ctx.drawImage(img, safeFrame * spriteW, 0, spriteW, spriteH, -s/2, -s/2, s, s);
             } else {
                 ctx.fillStyle = this.hp > 0 ? '#00cc00' : '#333'; ctx.beginPath(); ctx.arc(0, 0, this.size, 0, Math.PI*2); ctx.fill();
             }
@@ -790,6 +872,7 @@ class Bullet {
         for (let z of zombies) {
             if (z.hp > 0 && Math.hypot(z.x - this.x, z.y - this.y) < z.size + 20) {
                 z.hp -= this.damage; z.x += this.vx * (z.type === 'boss' ? 0.1 : 0.8); z.y += this.vy * (z.type === 'boss' ? 0.1 : 0.8);
+                // 玩家打僵尸：橘黄底，深棕边
                 addDamageText(z.x, z.y - z.size - 20, `-${this.damage}`, '#ffa500', '#5c4033');
                 this.life = 0; break;
             }
@@ -1016,7 +1099,7 @@ function gameLoop(time) {
             if (player.hasGun) {
                 let targetZombie = null; let closestDist = Infinity;
                 for (let z of zombies) {
-                    if (z.hp <= 0) continue;
+                    if (z.hp <= 0 || z.state === 'dead_idle') continue;
                     let d = Math.hypot(z.x - player.x, z.y - player.y);
                     if (d < player.attackRadius && d < closestDist) { closestDist = d; targetZombie = z; }
                 }
@@ -1132,9 +1215,7 @@ function gameLoop(time) {
     walls.forEach(w => renderList.push({ id: 'wall', obj: w, y: w.y }));
     if (player.hp > 0) renderList.push({ id: 'player', y: player.y + 40 });
     npcs.forEach(n => { renderList.push({ id: 'npc', obj: n, y: n.y + 45 }); });
-    
-    // 【核心更新】：保证尸体的排序也在底层
-    zombies.forEach(z => { renderList.push({ id: 'zombie', obj: z, y: z.y + (z.state==='dead_idle' ? -10 : (z.type==='boss'? z.size*0.875 : 45)) }); });
+    zombies.forEach(z => { renderList.push({ id: 'zombie', obj: z, y: z.y + (z.state === 'dead_idle' ? -10 : (z.type === 'boss' ? z.size * 0.875 : 45)) }); });
     resources.forEach(r => { renderList.push({ id: 'resource', obj: r, y: r.y }); });
 
     renderList.sort((a, b) => a.y - b.y);
@@ -1175,11 +1256,11 @@ function gameLoop(time) {
 
     walls.forEach(w => w.drawHP(w.x - player.x + cx, w.y - player.y + cy));
 
-    // 清理墙和回收超过视野的死亡单位
+    // 清理墙和回收死亡单位
     for (let i = walls.length - 1; i >= 0; i--) { if (walls[i].hp <= 0) walls.splice(i, 1); }
     for (let i = zombies.length - 1; i >= 0; i--) { 
         let z = zombies[i]; 
-        if (z.hp <= 0 && !z.isDeadCounted) { kills++; z.isDeadCounted = true; }
+        if (z.hp <= 0 && !z.isDeadCounted && z.state === 'dead_idle') { kills++; z.isDeadCounted = true; }
         if (z.state === 'dead_idle' && Math.hypot(z.x - player.x, z.y - player.y) > 2000) { zombies.splice(i, 1); }
     }
 
@@ -1271,8 +1352,15 @@ function gameLoop(time) {
     requestAnimationFrame(gameLoop);
 }
 
+function resizeUI() {
+    const container = document.getElementById('game-container'); const rect = container.getBoundingClientRect();
+    document.documentElement.style.setProperty('--ui-scale', rect.width / 1080);
+}
+window.addEventListener('resize', resizeUI); resizeUI();
+
 let totalAssets = Object.keys(assetPaths).length;
 let loadedAssets = 0;
+let isGameStarted = false; // 防止加载器重复触发死锁
 
 function checkLoadComplete() {
     loadedAssets++;
@@ -1284,7 +1372,8 @@ function checkLoadComplete() {
     if (textEl) textEl.innerText = `资源加载中 ${progress}%`;
     if (barEl) barEl.style.width = `${progress}%`;
     
-    if (loadedAssets >= totalAssets) {
+    if (loadedAssets >= totalAssets && !isGameStarted) {
+        isGameStarted = true;
         let loadingScreen = document.getElementById('loading-screen');
         if (loadingScreen) {
             loadingScreen.style.opacity = '0';
