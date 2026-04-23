@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>丧尸割草 Demo - 资源预加载版</title>
+    <title>丧尸割草 Demo - 完美骨骼动画版</title>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; display: flex; justify-content: center; align-items: center; touch-action: none; font-family: sans-serif; user-select: none; }
         #game-container { position: relative; width: auto; height: 100vh; aspect-ratio: 1080 / 1920; background-color: #1a1a1a; overflow: hidden; box-shadow: 0 0 30px rgba(255, 255, 255, 0.1); }
         canvas { display: block; width: 100%; height: 100%; }
         
-        /* 【新增】：加载界面全屏遮罩 */
         #loading-screen {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background-color: #0a0a0a; z-index: 9999;
@@ -41,7 +40,7 @@
         #hud-top {
             position: absolute; top: 20px; left: 20px; right: 20px;
             display: flex; justify-content: space-between; align-items: flex-start;
-            z-index: 10; pointer-events: none; transition: opacity 0.5s; opacity: 0; /* 默认隐藏，加载后显示 */
+            z-index: 10; pointer-events: none; transition: opacity 0.5s; opacity: 0; 
         }
         #player-profile {
             display: flex; align-items: center; background: rgba(0, 0, 0, 0.6);
@@ -140,19 +139,27 @@ const PART_TYPES = {
     debris:{ colRadius: 0,  colOffsetY: 0 }  
 };
 
-// 【核心修改】：资源预加载引擎准备
+// 【资源注册】：包含所有独立的序列帧
 const ASSETS = {};
 const assetPaths = {
     player_idle: './player_idle.png', player_move: './player_move.png',
     player_shoot: './player_shoot.png', player_move_shoot: './player_move_shoot.png',
     npc_run: './npc_run.png', npc_fall: './npc_fall.png', npc_dead: './npc_dead.png',
     tower_broken: './tower_broken.png', tower_active: './tower_active.png',
-    zombie1: './zombie1.png', zombie2: './zombie2.png', boss: './boss.png',
+    zombie2: './zombie2.png', boss: './boss.png',
     bullet: './bullet.png', bg: './bg.png',
     res_wood: './res_wood.png', res_iron: './res_iron.png', res_screw: './res_screw.png',
-    wall1: './wall1.png', wall2: './wall2.png'
+    wall1_idle: './wall1_idle.png', wall1_hit: './wall1_hit.png',
+    wall2_idle: './wall2_idle.png', wall2_hit: './wall2_hit.png',
+    
+    // 丧尸1与攻城丧尸的所有动作序列帧
+    zombie1_idle: './zombie1_idle.png', 
+    zombie1_run: './zombie1_run.png',
+    zombie1_move_attack: './zombie1_move_attack.png', 
+    zombie1_stay_attack: './zombie1_stay_attack.png',
+    zombie1_death: './zombie1_death.png', 
+    zombie1_dead_idle: './zombie1_dead_idle.png'
 };
-// 自动注入场景部件路径
 for(let key in PART_TYPES) { assetPaths[key] = `./${key}.png`; }
 
 const canvas = document.getElementById('gameCanvas');
@@ -182,7 +189,7 @@ const player = {
 
 let zombies = []; let bullets = []; let damageTexts = []; let npcs = []; let resources = []; let gunDrop = null; let kills = 0;
 let tower = null; let tower2 = null; let gate = null; let walls = []; let sceneParts = []; 
-let wallBuildPoint = null; 
+let wallBuilder = null; 
 const joystick = { active: false, startX: 0, startY: 0, currentX: 0, currentY: 0, vectorX: 0, vectorY: 0, maxRadius: 120 };
 
 function showCenterAlert(text, color, durationMs) {
@@ -258,23 +265,95 @@ function resolvePhysics(entity) {
 /** ==========================================
  * 实体类定义 
  * ========================================== */
+class WallBuilder {
+    constructor(x, y) {
+        this.x = x; this.y = y; this.state = 'broken';
+        this.repairTimer = 0; this.repairTimeMax = 2000; 
+        this.showEffect = false; this.effectRadius = 0;
+    }
+    update(dt, time) {
+        if (this.state === 'repairing') {
+            this.repairTimer += dt;
+            if (this.repairTimer >= this.repairTimeMax) {
+                this.state = 'active'; 
+                this.showEffect = true; this.effectRadius = 0;
+                addDamageText(this.x, this.y - 150, `✨ 基地要塞部署完毕 ✨`, '#00ffcc', '#000000');
+                
+                tutorialPhase = 'done';
+                let cfg = GameConfig.walls;
+                let dx = tower2.x - tower.x; let dy = tower2.y - tower.y; 
+                let len = Math.hypot(dx, dy); let ux = dx / len; let uy = dy / len; 
+                let vx = -uy; let vy = ux; 
+
+                let pA = { x: tower.x - ux * 3 * cfg.segmentLen, y: tower.y - uy * 3 * cfg.segmentLen };
+                for(let i=1; i<=3; i++) { walls.push(new WallSegment(tower.x - ux * i * cfg.segmentLen, tower.y - uy * i * cfg.segmentLen, false)); }
+
+                let pB = { x: tower2.x + ux * 3 * cfg.segmentLen, y: tower2.y + uy * 3 * cfg.segmentLen };
+                for(let i=1; i<=3; i++) { walls.push(new WallSegment(tower2.x + ux * i * cfg.segmentLen, tower2.y + uy * i * cfg.segmentLen, false)); }
+
+                walls.push(new WallSegment(tower.x - ux * 0.6 * cfg.segmentLen, tower.y - uy * 0.6 * cfg.segmentLen, false)); 
+                walls.push(new WallSegment(tower2.x + ux * 0.6 * cfg.segmentLen, tower2.y + uy * 0.6 * cfg.segmentLen, false));
+                walls.push(new WallSegment(pA.x + cfg.wall2StartOffset.x * 0.5, pA.y + cfg.wall2StartOffset.y * 0.5, true));
+                walls.push(new WallSegment(pB.x + cfg.wall3StartOffset.x * 0.5, pB.y + cfg.wall3StartOffset.y * 0.5, true));
+
+                let w2StartX = pA.x + cfg.wall2StartOffset.x; let w2StartY = pA.y + cfg.wall2StartOffset.y; 
+                let pD = { x: 0, y: 0 };
+                for(let i=0; i<8; i++) {
+                    let curX = w2StartX + i * (vx * cfg.segmentLen + cfg.stepOffset.x); let curY = w2StartY + i * (vy * cfg.segmentLen + cfg.stepOffset.y);
+                    walls.push(new WallSegment(curX, curY, true)); if (i === 7) pD = { x: curX, y: curY }; 
+                }
+
+                let w3StartX = pB.x + cfg.wall3StartOffset.x; let w3StartY = pB.y + cfg.wall3StartOffset.y; 
+                let pC = { x: 0, y: 0 };
+                for(let i=0; i<8; i++) {
+                    let curX = w3StartX + i * (vx * cfg.segmentLen + cfg.stepOffset.x); let curY = w3StartY + i * (vy * cfg.segmentLen + cfg.stepOffset.y);
+                    walls.push(new WallSegment(curX, curY, true)); if (i === 7) pC = { x: curX, y: curY }; 
+                }
+
+                let bottomLen = Math.hypot(pC.x - pD.x, pC.y - pD.y); let bottomCount = Math.floor(bottomLen / cfg.segmentLen);
+                let bux = (pC.x - pD.x) / bottomLen; let buy = (pC.y - pD.y) / bottomLen;
+                for(let i=1; i<=bottomCount; i++) { walls.push(new WallSegment(pD.x + bux * i * cfg.segmentLen, pD.y + buy * i * cfg.segmentLen, false)); }
+
+                siegeStarted = true; siegeStartTime = performance.now(); 
+                showCenterAlert("🚨 丧尸围城！突击丧尸正从西北方逼近！撤回基地防守！", "#ff0000", 8000);
+
+                let spawnOriginX = tower.x - 1500; let spawnOriginY = tower.y - 1500;
+                for(let i=0; i<100; i++) {
+                    let zx = spawnOriginX + (Math.random() - 0.5) * 1000; let zy = spawnOriginY + (Math.random() - 0.5) * 1000;
+                    zombies.push(new Zombie(zx, zy, 'siege'));
+                }
+            }
+        }
+    }
+    draw(screenX, screenY) {
+        if (this.showEffect) {
+            this.effectRadius += 30; let effectAlpha = Math.max(0, 1 - this.effectRadius / 1000);
+            ctx.strokeStyle = `rgba(0, 255, 200, ${effectAlpha})`; ctx.lineWidth = 20;
+            ctx.beginPath(); ctx.arc(screenX, screenY, this.effectRadius, 0, Math.PI*2); ctx.stroke();
+            ctx.fillStyle = `rgba(255, 255, 255, ${effectAlpha})`; ctx.beginPath(); ctx.arc(screenX, screenY, this.effectRadius/4, 0, Math.PI*2); ctx.fill();
+            if (this.effectRadius > 1000) this.showEffect = false;
+        }
+
+        if (this.state === 'repairing') {
+            ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(screenX - 80, screenY + 60, 160, 15);
+            ctx.fillStyle = '#00ffcc'; ctx.fillRect(screenX - 80, screenY + 60, 160 * (this.repairTimer/this.repairTimeMax), 15);
+            ctx.fillStyle = 'white'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign='center'; ctx.fillText("建造中...", screenX, screenY + 100); ctx.textAlign='left';
+        }
+    }
+}
+
 class ScenePart {
     constructor(type, x, y) {
-        this.type = type; this.x = x; this.y = y;
-        this.config = PART_TYPES[type];
-        this.scale = 2.0;
-        this.colRadius = this.config.colRadius * this.scale;
-        this.colOffsetY = this.config.colOffsetY * this.scale;
+        this.type = type; this.x = x; this.y = y; this.config = PART_TYPES[type]; this.scale = 2.0;
+        this.colRadius = this.config.colRadius * this.scale; this.colOffsetY = this.config.colOffsetY * this.scale;
     }
     draw(screenX, screenY) {
         let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
 
-        let img = ASSETS[this.type];
-        ctx.save();
-        if (img.complete && img.naturalWidth !== 0) {
-            let nw = img.naturalWidth * this.scale; 
-            let nh = img.naturalHeight * this.scale;
+        let img = ASSETS[this.type]; ctx.save();
+        if (img && img.complete && img.naturalWidth !== 0) {
+            let nw = img.naturalWidth * this.scale; let nh = img.naturalHeight * this.scale; 
             ctx.drawImage(img, screenX - nw/2, screenY - nh, nw, nh);
         } else {
             let fallbackSize = this.colRadius > 0 ? this.colRadius * 2 : 40 * this.scale;
@@ -286,56 +365,46 @@ class ScenePart {
 }
 
 class Resource {
-    constructor(x, y, type) {
-        this.x = x; this.y = y; this.type = type; 
-        this.size = 60; this.pickupRadius = 60;
-    }
+    constructor(x, y, type) { this.x = x; this.y = y; this.type = type; this.size = 60; this.pickupRadius = 60; }
     update(dt) {} 
     draw(screenX, screenY) {
         let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
 
-        let resName = this.type === 'wood' ? '破木材' : (this.type === 'iron' ? '旧铁皮' : '螺丝钉');
-        let img = ASSETS['res_' + this.type];
-        ctx.save(); ctx.shadowColor = '#fffacd'; ctx.shadowBlur = 4;
-        if (img.complete && img.naturalWidth !== 0) {
-            ctx.drawImage(img, screenX - this.size/2, screenY - this.size/2, this.size, this.size);
-        } else {
-            ctx.fillStyle = this.type === 'wood' ? '#8b5a2b' : (this.type === 'iron' ? '#b0c4de' : '#a9a9a9');
-            ctx.beginPath(); ctx.arc(screenX, screenY, this.size/2, 0, Math.PI*2); ctx.fill(); 
-        }
+        let img = ASSETS['res_' + this.type]; ctx.save(); ctx.shadowColor = '#fffacd'; ctx.shadowBlur = 4;
+        if (img && img.complete && img.naturalWidth !== 0) { ctx.drawImage(img, screenX - this.size/2, screenY - this.size/2, this.size, this.size);
+        } else { ctx.fillStyle = this.type === 'wood' ? '#8b5a2b' : (this.type === 'iron' ? '#b0c4de' : '#a9a9a9'); ctx.beginPath(); ctx.arc(screenX, screenY, this.size/2, 0, Math.PI*2); ctx.fill(); }
         ctx.restore();
     }
 }
 
 class WallSegment {
     constructor(x, y, flipX) {
-        this.x = x; this.y = y; 
-        this.flipX = flipX; 
-        this.scale = 1.8; 
-        this.radius = 32 * this.scale; 
-        this.imgType = Math.random() > 0.5 ? 1 : 2; 
-        this.hp = 300; this.maxHp = 300;
+        this.x = x; this.y = y; this.flipX = flipX; this.scale = 1.8; this.radius = 32 * this.scale; 
+        this.imgType = Math.random() > 0.5 ? 1 : 2; this.hp = 300; this.maxHp = 300;
+        this.state = 'idle'; this.frameX = 0; this.frameTimer = 0; this.frameInterval = 100;
     }
-    update(dt) {} 
-    
+    update(dt) {
+        if (this.state === 'hit') {
+            this.frameTimer += dt;
+            if (this.frameTimer > this.frameInterval) {
+                this.frameX++; if (this.frameX >= 2) { this.state = 'idle'; this.frameX = 0; }
+                this.frameTimer = 0;
+            }
+        }
+    } 
     draw(screenX, screenY) {
         let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
 
-        let img = this.imgType === 1 ? ASSETS.wall1 : ASSETS.wall2;
-        let downOffset = 22; 
-
-        ctx.save(); 
-        ctx.translate(screenX, screenY); 
-
-        if (this.flipX) ctx.scale(-1, 1); 
-        ctx.scale(this.scale, this.scale); 
-
-        if (img.complete && img.naturalWidth !== 0) {
-            ctx.drawImage(img, -64, -100 + downOffset, 128, 128);
+        let imgKey = `wall${this.imgType}_${this.state}`; let img = ASSETS[imgKey]; let downOffset = 22; 
+        ctx.save(); ctx.translate(screenX, screenY); if (this.flipX) ctx.scale(-1, 1); ctx.scale(this.scale, this.scale); 
+        
+        if (img && img.complete && img.naturalWidth !== 0) {
+            let spriteW = img.naturalWidth / (this.state === 'hit' ? 2 : 1);
+            ctx.drawImage(img, this.frameX * spriteW, 0, spriteW, img.naturalHeight, -64, -100 + downOffset, 128, 128);
         } else {
-            ctx.fillStyle = '#555'; ctx.fillRect(-32, -64 + downOffset, 64, 64);
+            ctx.fillStyle = this.state === 'hit' ? '#cc3333' : '#555'; ctx.fillRect(-32, -64 + downOffset, 64, 64);
             ctx.strokeStyle = '#222'; ctx.lineWidth = 3; ctx.strokeRect(-32, -64 + downOffset, 64, 64);
             ctx.fillStyle = '#666'; ctx.fillRect(-32, -64 + downOffset, 64, 8); 
             ctx.beginPath(); ctx.moveTo(-32, -32 + downOffset); ctx.lineTo(32, -32 + downOffset); ctx.stroke(); 
@@ -343,17 +412,13 @@ class WallSegment {
         }
         ctx.restore();
     }
-
     drawHP(screenX, screenY) {
         let gridX = Math.floor(this.x / FOG_TILE_SIZE); let gridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`) && gameState !== 'intro') return;
 
-        let hpY = -120 - 40; 
-        ctx.save();
-        ctx.translate(screenX, screenY);
+        let hpY = -120 - 40; ctx.save(); ctx.translate(screenX, screenY);
         if (this.hp < this.maxHp) {
-            ctx.fillStyle = '#000'; ctx.fillRect(-32, hpY - 2, 64, 10); 
-            ctx.fillStyle = '#ff0000'; ctx.fillRect(-31, hpY - 1, 62, 8); 
+            ctx.fillStyle = '#000'; ctx.fillRect(-32, hpY - 2, 64, 10); ctx.fillStyle = '#ff0000'; ctx.fillRect(-31, hpY - 1, 62, 8); 
             ctx.fillStyle = '#00ffaa'; ctx.fillRect(-31, hpY - 1, 62 * Math.max(0, this.hp / this.maxHp), 8); 
         }
         ctx.restore();
@@ -361,81 +426,57 @@ class WallSegment {
 }
 
 class Gate {
-    constructor(x1, y1, x2, y2) {
-        this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2;
-        this.openProgress = 0; this.thickness = 40;
-        this.locked = false; 
-    }
+    constructor(x1, y1, x2, y2) { this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2; this.openProgress = 0; this.thickness = 40; this.locked = false; }
     update(dt) {
         let distToPlayer = this.distToSegment(player.x, player.y);
-        
-        let dx = this.x2 - this.x1; let dy = this.y2 - this.y1; let len = Math.hypot(dx, dy);
-        let nx = -dy / len; let ny = dx / len; 
+        let dx = this.x2 - this.x1; let dy = this.y2 - this.y1; let len = Math.hypot(dx, dy); let nx = -dy / len; let ny = dx / len; 
         let dot = (player.x - this.x1) * nx + (player.y - this.y1) * ny;
 
         if (siegeStarted && !this.locked) {
-            if (dot > 80 && distToPlayer > 80) {
-                this.locked = true;
-                showCenterAlert("🔒 要塞大门已锁死！准备迎战！", "#ffcc00", 3000);
-            }
+            if (dot > 80 && distToPlayer > 80) { this.locked = true; showCenterAlert("🔒 要塞大门已锁死！准备迎战！", "#ffcc00", 3000); }
         }
 
-        if (!this.locked && distToPlayer < 250) { 
-            this.openProgress = Math.min(1, this.openProgress + dt / 300); 
-        } else { 
-            this.openProgress = Math.max(0, this.openProgress - dt / 300); 
-        }
+        if (!this.locked && distToPlayer < 250) { this.openProgress = Math.min(1, this.openProgress + dt / 300); } 
+        else { this.openProgress = Math.max(0, this.openProgress - dt / 300); }
 
         if (siegeStarted && this.locked) {
             let hasActiveZombies = zombies.some(z => z.hp > 0 && (z.type === 'siege' || z.type === 'boss'));
-            if (!hasActiveZombies && bossSpawnedInSiege) {
-                this.locked = false;
-            }
+            if (!hasActiveZombies && bossSpawnedInSiege) { this.locked = false; }
         }
     }
     distToSegment(px, py) {
-        let l2 = Math.pow(this.x2 - this.x1, 2) + Math.pow(this.y2 - this.y1, 2);
-        if (l2 === 0) return Math.hypot(px - this.x1, py - this.y1);
+        let l2 = Math.pow(this.x2 - this.x1, 2) + Math.pow(this.y2 - this.y1, 2); if (l2 === 0) return Math.hypot(px - this.x1, py - this.y1);
         let t = Math.max(0, Math.min(1, ((px - this.x1) * (this.x2 - this.x1) + (py - this.y1) * (this.y2 - this.y1)) / l2));
-        let projX = this.x1 + t * (this.x2 - this.x1); let projY = this.y1 + t * (this.y2 - this.y1);
-        return Math.hypot(px - projX, py - projY);
+        let projX = this.x1 + t * (this.x2 - this.x1); let projY = this.y1 + t * (this.y2 - this.y1); return Math.hypot(px - projX, py - projY);
     }
     draw(screenXOffset, screenYOffset) {
         let midWorldX = (this.x1 + this.x2)/2; let midWorldY = (this.y1 + this.y2)/2;
         let gridX = Math.floor(midWorldX / FOG_TILE_SIZE); let gridY = Math.floor(midWorldY / FOG_TILE_SIZE);
         if (!fogSet.has(`${gridX},${gridY}`)) return;
 
-        let sx1 = this.x1 - player.x + width/2; let sy1 = this.y1 - player.y + height/2;
-        let sx2 = this.x2 - player.x + width/2; let sy2 = this.y2 - player.y + height/2;
+        let sx1 = this.x1 - player.x + width/2; let sy1 = this.y1 - player.y + height/2; let sx2 = this.x2 - player.x + width/2; let sy2 = this.y2 - player.y + height/2;
         let midX = (sx1 + sx2) / 2; let midY = (sy1 + sy2) / 2;
 
         ctx.save(); ctx.strokeStyle = '#222'; ctx.lineWidth = this.thickness; ctx.lineCap = 'butt';
-        let fullDist = Math.hypot(sx2-sx1, sy2-sy1);
-        let gapWidth = (fullDist / 2 - 20) * this.openProgress; 
-        let angle = Math.atan2(sy2 - sy1, sx2 - sx1);
-        let dx = Math.cos(angle); let dy = Math.sin(angle);
+        let fullDist = Math.hypot(sx2-sx1, sy2-sy1); let gapWidth = (fullDist / 2 - 20) * this.openProgress; 
+        let angle = Math.atan2(sy2 - sy1, sx2 - sx1); let dx = Math.cos(angle); let dy = Math.sin(angle);
         
-        let d1EndX = midX - dx * gapWidth; let d1EndY = midY - dy * gapWidth;
-        let d2StartX = midX + dx * gapWidth; let d2StartY = midY + dy * gapWidth;
+        let d1EndX = midX - dx * gapWidth; let d1EndY = midY - dy * gapWidth; let d2StartX = midX + dx * gapWidth; let d2StartY = midY + dy * gapWidth;
 
         ctx.beginPath(); ctx.moveTo(sx1, sy1); ctx.lineTo(d1EndX, d1EndY); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(d2StartX, d2StartY); ctx.stroke();
         
-        ctx.strokeStyle = this.locked ? '#ff0000' : '#00ffcc'; 
-        ctx.lineWidth = 15; ctx.shadowColor = this.locked ? '#ff0000' : '#00ffcc'; ctx.shadowBlur = 20;
+        ctx.strokeStyle = this.locked ? '#ff0000' : '#00ffcc'; ctx.lineWidth = 15; ctx.shadowColor = this.locked ? '#ff0000' : '#00ffcc'; ctx.shadowBlur = 20;
         if(this.openProgress > 0.1 && !this.locked) { ctx.strokeStyle = '#ffcc00'; ctx.shadowColor = '#ffcc00'; } 
         ctx.beginPath(); ctx.moveTo(sx1, sy1); ctx.lineTo(d1EndX, d1EndY); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(d2StartX, d2StartY); ctx.stroke();
-        ctx.restore();
+        ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(d2StartX, d2StartY); ctx.stroke(); ctx.restore();
     }
 }
 
 class Tower {
     constructor(x, y, label) {
-        this.x = x; this.y = y; this.state = 'broken'; this.label = label || "防御塔";
-        this.repairTimer = 0; this.repairTimeMax = 2000; 
-        this.attackRadius = 500; this.lastShotTime = 0; this.shotInterval = 800; 
-        this.size = 100; this.imgWidth = 256; this.imgHeight = 512;
+        this.x = x; this.y = y; this.state = 'broken'; this.label = label || "防御塔"; this.repairTimer = 0; this.repairTimeMax = 2000; 
+        this.attackRadius = 500; this.lastShotTime = 0; this.shotInterval = 800; this.size = 100; this.imgWidth = 256; this.imgHeight = 512;
         this.showEffect = false; this.effectRadius = 0;
     }
     update(dt, time) {
@@ -467,26 +508,21 @@ class Tower {
         let img = this.state === 'active' ? ASSETS.tower_active : ASSETS.tower_broken;
         let drawX = screenX - this.imgWidth / 2; let drawY = screenY - this.imgHeight + 120;
 
-        if (img.complete && img.naturalWidth !== 0) {
+        if (img && img.complete && img.naturalWidth !== 0) {
             ctx.drawImage(img, drawX, drawY, this.imgWidth, this.imgHeight);
             if (this.state === 'broken') {
                 ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = 0.3 + Math.sin(Date.now()/200)*0.2;
-                ctx.drawImage(img, drawX, drawY, this.imgWidth, this.imgHeight);
-                ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1.0;
+                ctx.drawImage(img, drawX, drawY, this.imgWidth, this.imgHeight); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1.0;
             }
         } else {
             ctx.fillStyle = this.state === 'active' ? '#00ccff' : '#555555'; ctx.fillRect(drawX, drawY, this.imgWidth, this.imgHeight);
-            if (this.state === 'active') {
-                ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(screenX, screenY - 200, 30, 0, Math.PI*2); ctx.fill();
-                ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 40; ctx.fill(); ctx.shadowBlur = 0;
-            }
+            if (this.state === 'active') { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(screenX, screenY - 200, 30, 0, Math.PI*2); ctx.fill(); ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 40; ctx.fill(); ctx.shadowBlur = 0; }
         }
         ctx.globalAlpha = 1.0; 
 
         if (this.showEffect) {
             this.effectRadius += 25; let effectAlpha = Math.max(0, 1 - this.effectRadius / 800);
-            ctx.strokeStyle = `rgba(0, 255, 200, ${effectAlpha})`; ctx.lineWidth = 15;
-            ctx.beginPath(); ctx.arc(screenX, screenY, this.effectRadius, 0, Math.PI*2); ctx.stroke();
+            ctx.strokeStyle = `rgba(0, 255, 200, ${effectAlpha})`; ctx.lineWidth = 15; ctx.beginPath(); ctx.arc(screenX, screenY, this.effectRadius, 0, Math.PI*2); ctx.stroke();
             ctx.fillStyle = `rgba(255, 255, 255, ${effectAlpha})`; ctx.beginPath(); ctx.arc(screenX, screenY - 200, this.effectRadius/4, 0, Math.PI*2); ctx.fill();
             if (this.effectRadius > 800) this.showEffect = false;
         }
@@ -522,29 +558,38 @@ class NPC {
 
         if (this.state === 'dead') {
             let img = ASSETS.npc_dead;
-            if (img.complete && img.naturalWidth !== 0) {
+            if (img && img.complete && img.naturalWidth !== 0) {
                 ctx.save(); ctx.translate(screenX, screenY); ctx.drawImage(img, -64, -64, 128, 128); ctx.restore();
             } else { ctx.fillStyle = '#444444'; ctx.beginPath(); ctx.arc(screenX, screenY, this.size, 0, Math.PI*2); ctx.fill(); }
         } else {
             ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; ctx.beginPath(); ctx.ellipse(screenX, screenY + 45, 30, 15, 0, 0, Math.PI*2); ctx.fill();
             let img = this.state === 'run' ? ASSETS.npc_run : ASSETS.npc_fall;
-            if (img.complete && img.naturalWidth !== 0) {
+            if (img && img.complete && img.naturalWidth !== 0) {
                 let sx = this.frameX * this.spriteWidth;
-                if (sx + this.spriteWidth <= img.naturalWidth && this.spriteHeight <= img.naturalHeight) {
-                    ctx.save(); ctx.translate(screenX, screenY); ctx.drawImage(img, sx, 0, this.spriteWidth, this.spriteHeight, -64, -64, 128, 128); ctx.restore();
-                } else { ctx.fillStyle = '#ff00ff'; ctx.fillRect(screenX - 30, screenY - 40, 60, 80); }
+                ctx.save(); ctx.translate(screenX, screenY); ctx.drawImage(img, sx, 0, this.spriteWidth, this.spriteHeight, -64, -64, 128, 128); ctx.restore();
             } else { ctx.fillStyle = this.state === 'run' ? this.color : 'red'; ctx.beginPath(); ctx.arc(screenX, screenY, this.size, 0, Math.PI*2); ctx.fill(); }
         }
         if (this.state === 'run') { ctx.fillStyle = 'white'; ctx.font = '20px sans-serif'; ctx.fillText("救命!", screenX - 25, screenY - 50); }
     }
 }
 
+/** ==========================================
+ * 丧尸类：完美状态机与尸体系统
+ * ========================================== */
 class Zombie {
     constructor(x, y, type) {
-        this.x = x; this.y = y; this.type = type; this.state = 'idle'; this.stateTimer = 0; this.wanderVec = {x: 0, y: 0}; this.lastAttackTime = 0;
+        this.x = x; this.y = y; this.type = type; 
+        
+        // 【核心状态】：idle, run, move_attack, stay_attack, death, dead_idle
+        this.state = 'idle'; 
+        this.frameX = 0; this.frameTimer = 0; this.frameInterval = 100; 
+        this.facingRight = true;
         this.isInitial = false; 
+        this.isDeadCounted = false; 
+        
         this.aggroRadius = 800; 
         this.targetWall = null; 
+        this.wanderVec = {x: 0, y: 0}; this.stateTimer = 0; this.lastAttackTime = 0;
         
         if (type === 'boss') { 
             this.hp = 300; this.maxHp = 300; this.baseSpeed = 1.0; this.chaseSpeed = 2.0; this.size = 120; this.minDmg = 10; this.maxDmg = 20; this.attackInterval = 1500; 
@@ -552,7 +597,7 @@ class Zombie {
         } 
         else if (type === 'siege') {
             this.hp = 30; this.maxHp = 30; this.baseSpeed = 2.0; this.chaseSpeed = 3.5; this.size = 50; this.minDmg = 5; this.maxDmg = 8; 
-            this.attackInterval = 2500; 
+            this.attackInterval = 1000; 
             this.aggroRadius = Infinity; 
         }
         else if (type === 'normal2') { 
@@ -562,10 +607,55 @@ class Zombie {
             this.hp = 10; this.maxHp = 10; this.baseSpeed = 2.0; this.chaseSpeed = 3.5; this.size = 50; this.minDmg = 5; this.maxDmg = 8; this.attackInterval = 1000; 
         }
     }
+
     update(dt, time, targets) {
+        // 如果已经是停滞尸体，则什么都不做
+        if (this.state === 'dead_idle') return;
+
+        // 【核心拦截】：处理HP归零
+        if (this.hp <= 0) {
+            if (this.type === 'siege' || this.type === 'normal1') {
+                if (this.state !== 'death') { 
+                    this.state = 'death'; 
+                    this.frameX = 0; 
+                    this.frameTimer = 0; 
+                }
+            } else {
+                this.state = 'dead_idle'; 
+                return; 
+            }
+        }
+
+        // 更新动画序列帧
+        this.frameTimer += dt;
+        let drawState = this.state === 'chase' || this.state === 'wander' ? 'run' : this.state;
+        let frameLimits = { 'idle': 1, 'run': 5, 'move_attack': 8, 'stay_attack': 6, 'death': 7, 'dead_idle': 1 };
+        let currentLimit = frameLimits[drawState] || 1;
+
+        if (this.frameTimer > this.frameInterval) {
+            this.frameX++;
+            if (this.frameX >= currentLimit) {
+                if (this.state === 'death') {
+                    this.state = 'dead_idle'; 
+                    this.frameX = 0;
+                    return; // 【防粘连】：动画播放完变成尸体后立即停止
+                } else if (this.state.includes('attack')) {
+                    this.state = 'chase'; 
+                    this.frameX = 0;
+                } else {
+                    this.frameX = 0;
+                }
+            }
+            this.frameTimer = 0;
+        }
+
+        // 死亡倒地或攻击硬直期间，不进行寻路和移动
+        if (this.state === 'death' || this.state.includes('attack')) return;
+
         let targetX = player.x; let targetY = player.y; let targetEntity = player;
         let isTargetingWall = false;
 
+        // 攻城寻路优先级
         if (this.type === 'siege') {
             if (!this.targetWall || this.targetWall.hp <= 0) {
                 if (walls.length > 0) { this.targetWall = walls[Math.floor(Math.random() * walls.length)]; } 
@@ -589,10 +679,11 @@ class Zombie {
         }
 
         let distToTarget = Math.hypot(targetX - this.x, targetY - this.y);
-        
         if (!isTargetingWall && distToTarget > 3000 && this.type !== 'boss' && this.type !== 'siege' && gameState === 'playing') { this.hp = 0; return; }
         
         if (distToTarget < this.aggroRadius || isTargetingWall) { this.state = 'chase'; } else if (this.state === 'chase') { this.state = 'idle'; }
+
+        if (this.state === 'chase' || this.state === 'wander') { this.facingRight = (targetX > this.x); }
 
         this.stateTimer -= dt;
         if (this.stateTimer <= 0 && this.state !== 'chase') {
@@ -606,9 +697,10 @@ class Zombie {
         } 
         else if (this.state === 'wander') { this.x += this.wanderVec.x * this.baseSpeed; this.y += this.wanderVec.y * this.baseSpeed; }
 
+        // 单位互相排斥
         let repulseX = 0; let repulseY = 0;
         for (let other of zombies) {
-            if (other === this || other.hp <= 0) continue;
+            if (other === this || other.hp <= 0 || other.state === 'dead_idle') continue;
             let dx = this.x - other.x; let dy = this.y - other.y; let dist = Math.hypot(dx, dy);
             let overlapDist = (this.size + other.size) * 0.7; 
             if (dist > 0 && dist < overlapDist) {
@@ -619,52 +711,72 @@ class Zombie {
 
         let isPhysicallyBlocked = resolvePhysics(this); 
 
+        // 【触发墙壁攻击 -> 原地攻击】
         if (isPhysicallyBlocked && this.state === 'chase') {
             let hitWall = null; let closestWallDist = Infinity;
             for (let w of walls) {
                 let d = Math.hypot(this.x - w.x, this.y - w.y);
-                if (d < this.size * 0.8 + w.radius && d < closestWallDist) { 
-                    hitWall = w; closestWallDist = d;
-                }
+                if (d < this.size * 0.8 + w.radius && d < closestWallDist) { hitWall = w; closestWallDist = d; }
             }
-            
             if (hitWall && time - this.lastAttackTime > this.attackInterval) {
-                hitWall.hp -= 3; 
+                this.state = 'stay_attack'; this.frameX = 0; this.frameTimer = 0;
+                hitWall.hp -= 3; hitWall.state = 'hit'; hitWall.frameX = 0; hitWall.frameTimer = 0;
                 this.lastAttackTime = time;
                 addDamageText(hitWall.x, hitWall.y - 60, "-3", '#ff0000', '#ffffff');
             }
         }
 
+        // 【触发咬人攻击 -> 移动攻击】
         if (!isTargetingWall) {
             let tSize = targetEntity.size || 50; 
             if (distToTarget < this.size + tSize && time - this.lastAttackTime > this.attackInterval) {
+                this.state = 'move_attack'; this.frameX = 0; this.frameTimer = 0;
                 let dmg = Math.floor(Math.random() * (this.maxDmg - this.minDmg + 1)) + this.minDmg; 
                 targetEntity.hp -= dmg; this.lastAttackTime = time;
                 addDamageText(targetEntity.x, targetEntity.y - 80, `-${dmg}`, '#ff0000', '#ffffff');
-                if (targetEntity !== player && targetEntity.hp <= 0) { 
-                    addDamageText(targetEntity.x, targetEntity.y, `啊啊啊...`, '#ff0000', '#ffffff');
-                }
             }
         }
     }
+
     draw(screenX, screenY) {
         let zGridX = Math.floor(this.x / FOG_TILE_SIZE); let zGridY = Math.floor(this.y / FOG_TILE_SIZE);
         if (!fogSet.has(`${zGridX},${zGridY}`) && gameState !== 'intro') return;
 
         let s = this.size * 2.5; let shadowYOffset = this.type === 'boss' ? s * 0.35 : 45;
         let shadowRadiusX = this.type === 'boss' ? 70 : 35; let shadowRadiusY = this.type === 'boss' ? 35 : 18;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; ctx.beginPath(); ctx.ellipse(screenX, screenY + shadowYOffset, shadowRadiusX, shadowRadiusY, 0, 0, Math.PI*2); ctx.fill();
-
-        if (this.type !== 'boss' && gameState === 'intro') { } else {
-            let barWidth = this.type === 'boss' ? 200 : 80; let barOffset = this.type === 'boss' ? 100 : 60;
-            ctx.fillStyle = 'red'; ctx.fillRect(screenX - barWidth/2, screenY - barOffset, barWidth, 8);
-            ctx.fillStyle = '#0f0'; ctx.fillRect(screenX - barWidth/2, screenY - barOffset, barWidth * (this.hp/this.maxHp), 8);
-        }
-        let img = ASSETS[this.type === 'normal2' ? 'zombie2' : (this.type === 'boss' ? 'boss' : 'zombie1')];
-        if (this.type === 'siege') img = ASSETS['zombie1'];
         
-        if (img.complete && img.naturalWidth !== 0) { ctx.drawImage(img, screenX - s/2, screenY - s/2, s, s); } 
-        else { ctx.fillStyle = this.type === 'boss' ? '#800080' : (this.type === 'normal2' ? '#006400' : '#00cc00'); ctx.beginPath(); ctx.arc(screenX, screenY, this.size, 0, Math.PI*2); ctx.fill(); }
+        // 活物绘制阴影与血条
+        if (this.state !== 'dead_idle') {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; ctx.beginPath(); ctx.ellipse(screenX, screenY + shadowYOffset, shadowRadiusX, shadowRadiusY, 0, 0, Math.PI*2); ctx.fill();
+            if (this.hp > 0 && gameState !== 'intro') {
+                let barWidth = this.type === 'boss' ? 200 : 80; let barOffset = this.type === 'boss' ? 100 : 60;
+                ctx.fillStyle = 'red'; ctx.fillRect(screenX - barWidth/2, screenY - barOffset, barWidth, 8);
+                ctx.fillStyle = '#0f0'; ctx.fillRect(screenX - barWidth/2, screenY - barOffset, barWidth * (this.hp/this.maxHp), 8);
+            }
+        }
+
+        ctx.save(); ctx.translate(screenX, screenY);
+        if (!this.facingRight) ctx.scale(-1, 1);
+
+        let drawState = this.state === 'chase' || this.state === 'wander' ? 'run' : this.state;
+        
+        if (this.type === 'siege' || this.type === 'normal1') {
+            let img = ASSETS[`zombie1_${drawState}`];
+            if (img && img.complete && img.naturalWidth !== 0) {
+                let frameLimits = { 'idle': 1, 'run': 5, 'move_attack': 8, 'stay_attack': 6, 'death': 7, 'dead_idle': 1 };
+                let maxFrames = frameLimits[drawState] || 1;
+                let spriteW = img.naturalWidth / maxFrames; 
+                let spriteH = img.naturalHeight;
+                ctx.drawImage(img, this.frameX * spriteW, 0, spriteW, spriteH, -s/2, -s/2, s, s);
+            } else {
+                ctx.fillStyle = this.hp > 0 ? '#00cc00' : '#333'; ctx.beginPath(); ctx.arc(0, 0, this.size, 0, Math.PI*2); ctx.fill();
+            }
+        } else {
+            let img = ASSETS[this.type === 'normal2' ? 'zombie2' : 'boss'];
+            if (img && img.complete && img.naturalWidth !== 0) { ctx.drawImage(img, -s/2, -s/2, s, s); } 
+            else { ctx.fillStyle = this.hp > 0 ? (this.type === 'boss' ? '#800080' : '#006400') : '#333'; ctx.beginPath(); ctx.arc(0, 0, this.size, 0, Math.PI*2); ctx.fill(); }
+        }
+        ctx.restore();
     }
 }
 
@@ -676,16 +788,15 @@ class Bullet {
     update() {
         this.x += this.vx; this.y += this.vy; this.life--;
         for (let z of zombies) {
-            if (Math.hypot(z.x - this.x, z.y - this.y) < z.size + 20) {
+            if (z.hp > 0 && Math.hypot(z.x - this.x, z.y - this.y) < z.size + 20) {
                 z.hp -= this.damage; z.x += this.vx * (z.type === 'boss' ? 0.1 : 0.8); z.y += this.vy * (z.type === 'boss' ? 0.1 : 0.8);
-                // 【橘黄色 + 深棕色描边】
                 addDamageText(z.x, z.y - z.size - 20, `-${this.damage}`, '#ffa500', '#5c4033');
                 this.life = 0; break;
             }
         }
     }
     draw(screenX, screenY) {
-        if (ASSETS.bullet.complete && ASSETS.bullet.naturalWidth !== 0) {
+        if (ASSETS.bullet && ASSETS.bullet.complete && ASSETS.bullet.naturalWidth !== 0) {
             let angle = Math.atan2(this.vy, this.vx); ctx.save(); ctx.translate(screenX, screenY); ctx.rotate(angle);
             ctx.drawImage(ASSETS.bullet, -20, -10, 40, 20); ctx.restore(); 
         } else { ctx.fillStyle = 'yellow'; ctx.beginPath(); ctx.arc(screenX, screenY, 10, 0, Math.PI*2); ctx.fill(); }
@@ -693,7 +804,7 @@ class Bullet {
 }
 
 /** ==========================================
- * 控制器与建造系统
+ * 控制器与统一交互逻辑
  * ========================================== */
 function getMappedPos(e) {
     const touch = e.touches ? e.touches[0] : e; const rect = canvas.getBoundingClientRect();
@@ -714,72 +825,19 @@ function handleStart(e) {
         let targetObj = null; let btnX = 0; let btnY = 0;
 
         if (activeTowerToRepair) {
-            if (activeTowerToRepair === 'wall') {
-                targetObj = 'wall'; btnX = wallBuildPoint.x - player.x + (width/2); btnY = wallBuildPoint.y - player.y + (height/2) + 60;
-            } else {
-                targetObj = activeTowerToRepair; btnX = activeTowerToRepair.x - player.x + (width/2); btnY = activeTowerToRepair.y - player.y + (height/2) + 60;
-            }
+            targetObj = activeTowerToRepair; 
+            btnX = activeTowerToRepair.x - player.x + (width/2); 
+            btnY = activeTowerToRepair.y - player.y + (height/2) + 60;
         }
 
         if (targetObj) {
             if (Math.abs(pos.x - btnX) <= 130 && Math.abs(pos.y - btnY) <= 35) {
-                if (targetObj === 'wall') {
-                    tutorialPhase = 'done';
-                    let cfg = GameConfig.walls;
-                    let dx = tower2.x - tower.x; let dy = tower2.y - tower.y; 
-                    let len = Math.hypot(dx, dy); let ux = dx / len; let uy = dy / len; 
-                    let vx = -uy; let vy = ux; 
-
-                    let pA = { x: tower.x - ux * 3 * cfg.segmentLen, y: tower.y - uy * 3 * cfg.segmentLen };
-                    for(let i=1; i<=3; i++) { walls.push(new WallSegment(tower.x - ux * i * cfg.segmentLen, tower.y - uy * i * cfg.segmentLen, false)); }
-
-                    let pB = { x: tower2.x + ux * 3 * cfg.segmentLen, y: tower2.y + uy * 3 * cfg.segmentLen };
-                    for(let i=1; i<=3; i++) { walls.push(new WallSegment(tower2.x + ux * i * cfg.segmentLen, tower2.y + uy * i * cfg.segmentLen, false)); }
-
-                    // 补缝墙
-                    walls.push(new WallSegment(tower.x - ux * 0.6 * cfg.segmentLen, tower.y - uy * 0.6 * cfg.segmentLen, false)); 
-                    walls.push(new WallSegment(tower2.x + ux * 0.6 * cfg.segmentLen, tower2.y + uy * 0.6 * cfg.segmentLen, false));
-                    walls.push(new WallSegment(pA.x + cfg.wall2StartOffset.x * 0.5, pA.y + cfg.wall2StartOffset.y * 0.5, true));
-                    walls.push(new WallSegment(pB.x + cfg.wall3StartOffset.x * 0.5, pB.y + cfg.wall3StartOffset.y * 0.5, true));
-
-                    let w2StartX = pA.x + cfg.wall2StartOffset.x; let w2StartY = pA.y + cfg.wall2StartOffset.y; 
-                    let pD = { x: 0, y: 0 };
-                    for(let i=0; i<8; i++) {
-                        let curX = w2StartX + i * (vx * cfg.segmentLen + cfg.stepOffset.x);
-                        let curY = w2StartY + i * (vy * cfg.segmentLen + cfg.stepOffset.y);
-                        walls.push(new WallSegment(curX, curY, true));
-                        if (i === 7) pD = { x: curX, y: curY }; 
-                    }
-
-                    let w3StartX = pB.x + cfg.wall3StartOffset.x; let w3StartY = pB.y + cfg.wall3StartOffset.y; 
-                    let pC = { x: 0, y: 0 };
-                    for(let i=0; i<8; i++) {
-                        let curX = w3StartX + i * (vx * cfg.segmentLen + cfg.stepOffset.x);
-                        let curY = w3StartY + i * (vy * cfg.segmentLen + cfg.stepOffset.y);
-                        walls.push(new WallSegment(curX, curY, true));
-                        if (i === 7) pC = { x: curX, y: curY }; 
-                    }
-
-                    let bottomLen = Math.hypot(pC.x - pD.x, pC.y - pD.y);
-                    let bottomCount = Math.floor(bottomLen / cfg.segmentLen);
-                    let bux = (pC.x - pD.x) / bottomLen; let buy = (pC.y - pD.y) / bottomLen;
-                    for(let i=1; i<=bottomCount; i++) { walls.push(new WallSegment(pD.x + bux * i * cfg.segmentLen, pD.y + buy * i * cfg.segmentLen, false)); }
-
-                    siegeStarted = true;
-                    siegeStartTime = performance.now(); 
-                    showCenterAlert("🚨 丧尸围城！突击丧尸正从西北方逼近！撤回阵地防守！", "#ff0000", 8000);
-
-                    let spawnOriginX = tower.x - 1500;
-                    let spawnOriginY = tower.y - 1500;
-                    for(let i=0; i<100; i++) {
-                        let zx = spawnOriginX + (Math.random() - 0.5) * 1000;
-                        let zy = spawnOriginY + (Math.random() - 0.5) * 1000;
-                        zombies.push(new Zombie(zx, zy, 'siege'));
-                    }
-
-                } else { targetObj.state = 'repairing'; }
+                targetObj.state = 'repairing'; 
                 return; 
-            } else { addDamageText(player.x, player.y - 100, "离太远了!", '#ffcc00', null); return; }
+            } else { 
+                addDamageText(player.x, player.y - 100, "离太远了!", '#ffcc00', null); 
+                return; 
+            }
         }
     }
 
@@ -796,7 +854,7 @@ canvas.addEventListener('mousedown', handleStart); window.addEventListener('mous
 canvas.addEventListener('touchstart', handleStart, {passive: false}); window.addEventListener('touchmove', handleMove, {passive: false}); window.addEventListener('touchend', handleEnd);
 
 /** ==========================================
- * 5. 生态场景生成算法
+ * 生态场景生成算法
  * ========================================== */
 function generateScene() {
     const RANGE = 3000;
@@ -850,10 +908,9 @@ function initGame() {
     
     siegeStarted = false; siegeStartTime = 0; bossSpawnedInSiege = false; hordeStartTime = Infinity; 
     
-    fogSet.clear(); walls = []; sceneParts = []; wallBuildPoint = null; resources = []; zombies = []; bullets = []; damageTexts = [];
+    fogSet.clear(); walls = []; sceneParts = []; wallBuilder = null; resources = []; zombies = []; bullets = []; damageTexts = [];
     
-    // UI重置
-    let hud = document.getElementById('hud-top'); if(hud) hud.style.opacity = '1'; // 直接显示UI
+    let hud = document.getElementById('hud-top'); if(hud) hud.style.opacity = '1'; 
 
     gunDrop = { x: player.x, y: player.y + 900 }; 
     tower = new Tower(player.x - 250, player.y + 1200, "1号防线"); 
@@ -866,26 +923,6 @@ function initGame() {
         let z = new Zombie(player.x + (Math.random()*250 - 125), player.y - 180 - Math.random()*40, 'normal1');
         z.hp = 10; z.maxHp = 10; z.isInitial = true; z.state = 'chase'; zombies.push(z);
     }
-    
-    for(let i=0; i<8; i++) {
-        let rx = tower.x + (Math.random() * 1600 - 800);
-        let ry = tower.y + 200 + Math.random() * 1400; 
-        let types = ['wood', 'iron', 'screw']; let type = types[Math.floor(Math.random() * types.length)];
-        resources.push(new Resource(rx, ry, type));
-    }
-}
-
-function spawnZombie(isInitialWave = false, forceSiege = false) {
-    let angle = Math.random() * Math.PI * 2; 
-    let dist = isInitialWave ? (600 + Math.random() * 200) : (Math.max(width, height) / 2 + 200 + Math.random() * 500);
-    let type = forceSiege ? 'siege' : (Math.random() < 0.6 ? 'normal1' : 'normal2');
-    zombies.push(new Zombie(player.x + Math.cos(angle) * dist, player.y + Math.sin(angle) * dist, type));
-}
-
-function spawnResourceNear(originX, originY) {
-    let angle = Math.random() * Math.PI * 2; let dist = 150 + Math.random() * 250; 
-    let types = ['wood', 'iron', 'screw']; let type = types[Math.floor(Math.random() * types.length)];
-    resources.push(new Resource(originX + Math.cos(angle)*dist, originY + Math.sin(angle)*dist, type));
 }
 
 function drawArrowTo(targetX, targetY, text, cx, cy, time) {
@@ -933,7 +970,11 @@ function gameLoop(time) {
         }
         if (tutorialPhase === 'fix_tower1' && tower.state === 'active') {
             tutorialPhase = 'gather'; showCenterAlert("📡 防御塔启动！扫描到附近有建材，请收集以部署新防线！", "#00ffcc", 5000);
-            for(let i=0; i<8; i++) spawnResourceNear(tower.x, tower.y);
+            for(let i=0; i<8; i++) {
+                let rx = tower.x + (Math.random() * 1600 - 800); let ry = tower.y + 200 + Math.random() * 1400; 
+                let types = ['wood', 'iron', 'screw']; let type = types[Math.floor(Math.random() * types.length)];
+                resources.push(new Resource(rx, ry, type));
+            }
         }
         if (tutorialPhase === 'gather' && totalResourcesCollected >= 4) {
             tutorialPhase = 'build_tower2'; tower2 = new Tower(tower.x + GameConfig.tower2.offsetX, tower.y + GameConfig.tower2.offsetY, "2号防线"); showCenterAlert("📍 资源充足！已解锁新防线建设许可", "#00ffcc", 4000);
@@ -941,10 +982,15 @@ function gameLoop(time) {
         if (tutorialPhase === 'build_tower2' && tower2 && tower2.state === 'active' && !gate) {
             tutorialPhase = 'gather_walls'; gate = new Gate(tower.x, tower.y, tower2.x, tower2.y);
             showCenterAlert("⛩️ 钢铁大门已启动！新任务：收集物资，准备加固要塞外围！", "#ffcc00", 5000);
-            for(let i=0; i<5; i++) spawnResourceNear(tower.x + 150, tower.y - 75);
+            for(let i=0; i<5; i++) {
+                let angle = Math.random() * Math.PI * 2; let dist = 150 + Math.random() * 250; 
+                let types = ['wood', 'iron', 'screw']; let type = types[Math.floor(Math.random() * types.length)];
+                resources.push(new Resource(tower.x + 150 + Math.cos(angle)*dist, tower.y - 75 + Math.sin(angle)*dist, type));
+            }
         }
         if (tutorialPhase === 'gather_walls' && wallResourcesCollected >= 3) {
-            tutorialPhase = 'build_walls'; wallBuildPoint = { x: tower.x - 120, y: tower.y + 60 };
+            tutorialPhase = 'build_walls'; 
+            wallBuilder = new WallBuilder(tower.x - 120, tower.y + 60);
             showCenterAlert("📍 建材充足！请前往 1号塔 旁边部署要塞围墙", "#00ffcc", 5000);
         }
         
@@ -957,8 +1003,11 @@ function gameLoop(time) {
         }
 
         if (performance.now() >= hordeStartTime || tutorialPhase === 'done') {
-            let currentNormalZombies = zombies.filter(z => z.type !== 'boss').length;
-            for (let i = 0; i < 40 - currentNormalZombies; i++) { spawnZombie(false, true); }
+            let currentNormalZombies = zombies.filter(z => z.hp > 0 && z.type !== 'boss').length;
+            for (let i = 0; i < 40 - currentNormalZombies; i++) { 
+                let angle = Math.random() * Math.PI * 2; let dist = (Math.max(width, height) / 2 + 200 + Math.random() * 500);
+                zombies.push(new Zombie(player.x + Math.cos(angle) * dist, player.y + Math.sin(angle) * dist, 'siege'));
+            }
         }
         
         if (player.hp > 0) {
@@ -992,6 +1041,7 @@ function gameLoop(time) {
 
         let isRepairingWall = false;
         for (let w of walls) {
+            w.update(dt); 
             if (w.hp < w.maxHp) {
                 let dist = Math.hypot(player.x - w.x, player.y - w.y);
                 if (dist < 150) { 
@@ -1011,6 +1061,7 @@ function gameLoop(time) {
             }
         } else { player.isHealing = isRepairingWall; }
 
+        if (wallBuilder) wallBuilder.update(dt, time);
         if (gate) gate.update(dt); walls.forEach(w => w.update(dt));
         zombies.forEach(z => z.update(dt, time, targets)); bullets.forEach(b => b.update()); npcs.forEach(n => n.update(dt));
         
@@ -1075,22 +1126,24 @@ function gameLoop(time) {
     if (tower) renderList.push({ id: 'tower', obj: tower, y: tower.y + 120 });
     if (tower2) renderList.push({ id: 'tower2', obj: tower2, y: tower2.y + 120 });
     if (gate) renderList.push({ id: 'gate', obj: gate, y: Math.max(gate.y1, gate.y2) });
+    if (wallBuilder) renderList.push({ id: 'wallBuilder', obj: wallBuilder, y: wallBuilder.y });
     
     sceneParts.forEach(p => renderList.push({ id: 'part', obj: p, y: p.y + p.colOffsetY }));
     walls.forEach(w => renderList.push({ id: 'wall', obj: w, y: w.y }));
     if (player.hp > 0) renderList.push({ id: 'player', y: player.y + 40 });
     npcs.forEach(n => { renderList.push({ id: 'npc', obj: n, y: n.y + 45 }); });
-    zombies.forEach(z => { if (z.hp > 0) renderList.push({ id: 'zombie', obj: z, y: z.y + (z.type==='boss'? z.size*0.875 : 45) }); });
+    
+    // 【核心更新】：保证尸体的排序也在底层
+    zombies.forEach(z => { renderList.push({ id: 'zombie', obj: z, y: z.y + (z.state==='dead_idle' ? -10 : (z.type==='boss'? z.size*0.875 : 45)) }); });
     resources.forEach(r => { renderList.push({ id: 'resource', obj: r, y: r.y }); });
 
     renderList.sort((a, b) => a.y - b.y);
 
     for (let ent of renderList) {
-        if (ent.id === 'tower' || ent.id === 'tower2' || ent.id === 'resource' || ent.id === 'gate' || ent.id === 'wall' || ent.id === 'part') {
+        if (ent.id === 'tower' || ent.id === 'tower2' || ent.id === 'resource' || ent.id === 'gate' || ent.id === 'wall' || ent.id === 'part' || ent.id === 'wallBuilder') {
             ent.obj.draw(ent.obj.x - player.x + cx, ent.obj.y - player.y + cy);
         } else if (ent.id === 'npc' || ent.id === 'zombie') {
-            if (ent.id === 'zombie' && ent.obj.hp <= 0 && ent.obj.type !== 'boss' && !ent.obj.processed) { ent.obj.processed = true; 
-            } else if (ent.obj.hp > 0 || ent.id === 'npc') { ent.obj.draw(ent.obj.x - player.x + cx, ent.obj.y - player.y + cy); }
+            ent.obj.draw(ent.obj.x - player.x + cx, ent.obj.y - player.y + cy);
         } else if (ent.id === 'player') {
             let drawX = cx - 64 + player.spriteOffsetX; let drawY = cy - 64 + player.spriteOffsetY;
             ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; ctx.beginPath(); ctx.ellipse(cx, cy + 45, 35, 18, 0, 0, Math.PI*2); ctx.fill();
@@ -1109,7 +1162,7 @@ function gameLoop(time) {
             let currentImg = ASSETS[`player_${player.state}`]; ctx.save(); ctx.translate(cx, cy); if (!player.facingRight) { ctx.scale(-1, 1); }
             let flipDrawX = -64 + player.spriteOffsetX; let flipDrawY = -64 + player.spriteOffsetY;
             
-            if (currentImg.complete && currentImg.naturalWidth !== 0) {
+            if (currentImg && currentImg.complete && currentImg.naturalWidth !== 0) {
                 let sx = player.frameX * player.spriteWidth;
                 if (sx + player.spriteWidth <= currentImg.naturalWidth && player.spriteHeight <= currentImg.naturalHeight) { ctx.drawImage(currentImg, sx, 0, player.spriteWidth, player.spriteHeight, flipDrawX, flipDrawY, 128, 128); } 
                 else { ctx.fillStyle = '#ff00ff'; ctx.fillRect(-30 + player.spriteOffsetX, -40 + player.spriteOffsetY, 60, 80); }
@@ -1122,8 +1175,13 @@ function gameLoop(time) {
 
     walls.forEach(w => w.drawHP(w.x - player.x + cx, w.y - player.y + cy));
 
+    // 清理墙和回收超过视野的死亡单位
     for (let i = walls.length - 1; i >= 0; i--) { if (walls[i].hp <= 0) walls.splice(i, 1); }
-    for (let i = zombies.length - 1; i >= 0; i--) { let z = zombies[i]; if (z.hp <= 0) { kills++; zombies.splice(i, 1); } }
+    for (let i = zombies.length - 1; i >= 0; i--) { 
+        let z = zombies[i]; 
+        if (z.hp <= 0 && !z.isDeadCounted) { kills++; z.isDeadCounted = true; }
+        if (z.state === 'dead_idle' && Math.hypot(z.x - player.x, z.y - player.y) > 2000) { zombies.splice(i, 1); }
+    }
 
     fctx.clearRect(0, 0, width, height); fctx.globalCompositeOperation = 'source-over'; fctx.fillStyle = 'rgba(0, 0, 0, 0.65)'; fctx.fillRect(0, 0, width, height);
     fctx.globalCompositeOperation = 'destination-out'; fctx.fillStyle = 'rgba(0, 0, 0, 1)'; 
@@ -1168,12 +1226,12 @@ function gameLoop(time) {
         activeTowerToRepair = null;
         let t1Active = (tutorialPhase === 'fix_tower1' && tower && tower.state === 'broken' && Math.hypot(player.x - tower.x, player.y - tower.y) < 250);
         let t2Active = (tutorialPhase === 'build_tower2' && tower2 && tower2.state === 'broken' && Math.hypot(player.x - tower2.x, player.y - tower2.y) < 250);
-        let wallActive = (tutorialPhase === 'build_walls' && wallBuildPoint && Math.hypot(player.x - wallBuildPoint.x, player.y - wallBuildPoint.y) < 250);
+        let wallActive = (tutorialPhase === 'build_walls' && wallBuilder && wallBuilder.state === 'broken' && Math.hypot(player.x - wallBuilder.x, player.y - wallBuilder.y) < 250);
 
         let btnX = 0, btnY = 0, btnText = "";
         if (t1Active) { activeTowerToRepair = tower; btnX = tower.x; btnY = tower.y; btnText = "⚙️ 修复防御塔"; } 
         else if (t2Active) { activeTowerToRepair = tower2; btnX = tower2.x; btnY = tower2.y; btnText = "⚙️ 部署新防线"; }
-        else if (wallActive) { activeTowerToRepair = 'wall'; btnX = wallBuildPoint.x; btnY = wallBuildPoint.y; btnText = "🧱 部署要塞围墙"; }
+        else if (wallActive) { activeTowerToRepair = wallBuilder; btnX = wallBuilder.x; btnY = wallBuilder.y; btnText = "🧱 部署要塞围墙"; }
 
         if (activeTowerToRepair) {
             let screenBtnX = btnX - player.x + cx; let screenBtnY = btnY - player.y + cy + 60; let scale = 1 + Math.sin(time / 150) * 0.03;
@@ -1193,7 +1251,7 @@ function gameLoop(time) {
         } else if (tutorialPhase === 'build_tower2' && tower2 && tower2.state === 'broken') { drawArrowTo(tower2.x, tower2.y, "前往部署新防线！", cx, cy, time);
         } else if (tutorialPhase === 'gather_walls') {
             if (resources.length > 0) { let nearest = resources.reduce((a, b) => Math.hypot(player.x - a.x, player.y - a.y) < Math.hypot(player.x - b.x, player.y - b.y) ? a : b); drawArrowTo(nearest.x, nearest.y, `雷达: 收集建材建墙 (${wallResourcesCollected}/3)`, cx, cy, time); }
-        } else if (tutorialPhase === 'build_walls' && wallBuildPoint) { drawArrowTo(wallBuildPoint.x, wallBuildPoint.y, "前往 1号塔旁 部署要塞围墙！", cx, cy, time); }
+        } else if (tutorialPhase === 'build_walls' && wallBuilder && wallBuilder.state === 'broken') { drawArrowTo(wallBuilder.x, wallBuilder.y, "前往 1号塔旁 部署要塞围墙！", cx, cy, time); }
     }
 
     if (joystick.active && player.hp > 0 && gameState === 'playing') {
@@ -1213,9 +1271,6 @@ function gameLoop(time) {
     requestAnimationFrame(gameLoop);
 }
 
-/** ==========================================
- * 资源预加载引擎引擎
- * ========================================== */
 let totalAssets = Object.keys(assetPaths).length;
 let loadedAssets = 0;
 
@@ -1229,7 +1284,6 @@ function checkLoadComplete() {
     if (textEl) textEl.innerText = `资源加载中 ${progress}%`;
     if (barEl) barEl.style.width = `${progress}%`;
     
-    // 当所有资源加载完成（即使部分加载失败也会触发，保证游戏能进去）
     if (loadedAssets >= totalAssets) {
         let loadingScreen = document.getElementById('loading-screen');
         if (loadingScreen) {
@@ -1238,16 +1292,15 @@ function checkLoadComplete() {
                 loadingScreen.style.display = 'none';
                 initGame(); 
                 requestAnimationFrame(gameLoop);
-            }, 800); // 渐隐过渡 0.8 秒后正式启动游戏
+            }, 800); 
         }
     }
 }
 
-// 循环加载所有的贴图
 for (let key in assetPaths) {
     ASSETS[key] = new Image();
     ASSETS[key].onload = checkLoadComplete;
-    ASSETS[key].onerror = checkLoadComplete; // 即使加载失败也允许进入游戏(有图形替补)
+    ASSETS[key].onerror = checkLoadComplete; 
     ASSETS[key].src = assetPaths[key];
 }
 
