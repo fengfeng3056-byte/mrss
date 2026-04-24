@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>丧尸割草 Demo - 剧情暂停版</title>
+    <title>丧尸割草 Demo - UI完美适配版</title>
     <style>
         :root { --ui-scale: 1; }
         body, html { 
@@ -47,7 +47,7 @@
             text-align: center; width: 90%; line-height: 1.4; 
         }
 
-        /* ============== 完美优化的剧情对话框 ============== */
+        /* ============== 修复：原比例完美适配的剧情对话框 ============== */
         #dialog-overlay {
             position: absolute; 
             top: 0; left: 0; 
@@ -59,54 +59,64 @@
             transition: opacity 0.3s;
             display: flex;
             justify-content: center;
+            align-items: flex-end; /* 让对话框整体沉到底部附近 */
+            padding-bottom: 25%; /* 避开下方摇杆区域 */
+            box-sizing: border-box;
         }
         #dialog-box {
-            position: absolute;
-            bottom: 25%; /* 整体往上移，防止挡住摇杆 */
-            width: 90%; 
-            height: 16em; /* 对话框高度 */
+            position: relative;
+            width: 85%; /* 对话框占屏幕宽度的比例 */
+            max-width: 800px;
+            /* 取消写死的高度，让背景图片自然撑开高度 */
         }
         #dialog-bg-img {
-            position: absolute; 
-            top: 0; left: 0; 
-            width: 100%; height: 100%; 
-            object-fit: fill; 
+            width: 100%; 
+            height: auto; /* 保证原比例不会被拉伸压扁 */
+            display: block; /* 消除img底部的间隙 */
             z-index: 1;
+            /* 若没加载出图的兜底样式 */
             background: rgba(20, 20, 20, 0.9); 
-            border: 0.2em solid #555; 
             border-radius: 1.5em;
         }
         #dialog-avatar-img {
             position: absolute; 
-            bottom: 0; 
-            left: -1em; 
-            width: 16em; 
-            height: 22em; /* 立绘突破上边框形成立体感 */
-            object-fit: contain; 
+            bottom: 0; /* 立绘脚部对齐对话框底部 */
+            left: -15%; /* 立绘往左突出 */
+            height: 160%; /* 高度是对话框的1.6倍，形成破框效果 */
+            width: auto; /* 保证原比例不会被拉伸压扁 */
+            max-height: 50vh; /* 【核心兜底】：绝对不超屏幕高度一半，保证完整显示不被切掉脑袋 */
             z-index: 2;
+            object-fit: contain;
+            object-position: bottom left;
         }
         #dialog-text {
             position: absolute; 
-            top: 2em; 
-            left: 8em; /* 留出左边立绘空间 (基于内部字体2em，8em等于主级的16em) */
-            right: 1em; 
-            bottom: 2em; 
+            top: 15%; 
+            left: 22%; /* 给左侧的立绘留出空间 */
+            right: 5%; 
+            bottom: 15%; 
             z-index: 3;
             color: white; 
-            font-size: 2em; /* 字体大小精准设为20 */
+            /* 【核心】：强制使用绝对像素 24px，无视所有缩放比例！ */
+            font-size: 24px !important; 
             text-align: left; 
-            white-space: normal; /* 开启自动换行 */
+            white-space: normal; 
             line-height: 1.6; 
-            text-shadow: 0.1em 0.1em 0.2em black;
+            text-shadow: 2px 2px 4px black;
+            overflow-y: auto; /* 字太多可以内部滑动 */
         }
         #dialog-tip {
             position: absolute; 
-            bottom: 1em; right: 1.5em; 
-            z-index: 3; color: #00ffcc; font-size: 1.4em; 
+            bottom: 5%; 
+            right: 5%; 
+            z-index: 3; 
+            color: #00ffcc; 
+            /* 提示文字也锁定绝对像素 */
+            font-size: 16px !important; 
             animation: blink 1s infinite;
         }
         @keyframes blink { 50% { opacity: 0.2; } }
-        /* ============================================== */
+        /* ========================================================== */
 
         #hud-top { 
             position: absolute; top: 2em; left: 2em; right: 2em; 
@@ -181,9 +191,9 @@
         <div id="dialog-overlay" onclick="hideDialog()">
             <div id="dialog-box">
                 <img id="dialog-bg-img" src="./dialog_bg.png" onerror="this.style.display='none'">
-                <img id="dialog-avatar-img" src="./dialog_avatar.png" onerror="this.style.display='none'; document.getElementById('dialog-text').style.left='1em';">
+                <img id="dialog-avatar-img" src="./dialog_avatar.png" onerror="this.style.display='none'; document.getElementById('dialog-text').style.left='5%';">
                 <div id="dialog-text"></div>
-                <div id="dialog-tip">点击任意位置继续</div>
+                <div id="dialog-tip">点击任意位置继续 ▼</div>
             </div>
         </div>
         
@@ -448,6 +458,7 @@ function showCenterAlert(text, color, durationMs) {
     }
 }
 
+let dialogTimeout;
 function showDialog(text) {
     let el = document.getElementById('dialog-overlay');
     document.getElementById('dialog-text').innerText = text;
@@ -676,7 +687,6 @@ class WallBuilder {
             ctx.fillRect(screenX - 80, screenY + 60, 160 * (this.repairTimer / this.repairTimeMax), 15);
             
             ctx.fillStyle = 'white'; 
-            // 【自适应修复】：使用绝对 px 单位，匹配 1080x1920 的自适应缩放机制
             ctx.font = 'bold 24px sans-serif'; 
             ctx.textAlign='center'; 
             ctx.fillText("建造中...", screenX, screenY + 100); 
@@ -724,7 +734,6 @@ class Resource {
         this.x = x; 
         this.y = y; 
         this.type = type; 
-        // 放大0.6倍
         this.size = 96; 
         this.pickupRadius = 80;
     }
@@ -741,7 +750,6 @@ class Resource {
         ctx.save(); 
         
         if (img && img.complete && img.naturalWidth > 0) {
-            // 使用 drop-shadow 模拟实体描边
             let d = 3;
             ctx.filter = `drop-shadow(${d}px 0px 0px #F5DEB3) drop-shadow(-${d}px 0px 0px #F5DEB3) drop-shadow(0px ${d}px 0px #F5DEB3) drop-shadow(0px -${d}px 0px #F5DEB3)`;
             ctx.drawImage(img, screenX - this.size/2, screenY - this.size/2, this.size, this.size);
@@ -781,7 +789,6 @@ class WallSegment {
         let renderScale = (img && img.naturalHeight > 0) ? (128 / img.naturalHeight) * this.scale : this.scale;
         let collider = COLLIDER_CACHE[imgKey];
         
-        // 1.35 防漏风膨胀系数
         let wallSealMultiplier = 1.35; 
         this.colRadius = collider ? (collider.radius * renderScale * wallSealMultiplier) : 32 * this.scale * wallSealMultiplier;
         this.colOffsetY = 50 * this.scale + (collider ? collider.offsetY * renderScale : -10 * this.scale);
@@ -1088,7 +1095,6 @@ class Tower {
             ctx.fillStyle = '#00ffcc'; 
             ctx.fillRect(screenX - 80, screenY + 60, 160 * (this.repairTimer/this.repairTimeMax), 15);
             ctx.fillStyle = 'white'; 
-            // 【自适应修复】：纯 px 保证完美渲染比例
             ctx.font = 'bold 24px sans-serif'; 
             ctx.textAlign='center'; 
             ctx.fillText("部署中...", screenX, screenY + 100); 
@@ -1186,7 +1192,7 @@ class NPC {
         }
         if (this.state === 'run') { 
             ctx.fillStyle = 'white'; 
-            ctx.font = 'bold 30px sans-serif'; // 【自适应修复】
+            ctx.font = 'bold 30px sans-serif'; 
             ctx.fillText("救命!", screenX - 25, screenY - 50); 
         }
     }
@@ -1575,7 +1581,7 @@ class Bullet {
 }
 
 /** ==========================================
- * 这次补上了箭头绘制辅助函数！
+ * 这次补上了箭头绘制辅助函数！！！
  * ========================================== */
 function drawArrowTo(targetX, targetY, text, cx, cy, time) {
     let angle = Math.atan2(targetY - player.y, targetX - player.x); 
@@ -1597,7 +1603,7 @@ function drawArrowTo(targetX, targetY, text, cx, cy, time) {
         ctx.restore(); 
         
         ctx.fillStyle = '#00ffcc'; 
-        ctx.font = 'bold 48px sans-serif'; // 【自适应修复】
+        ctx.font = 'bold 48px sans-serif'; 
         ctx.textAlign = 'center'; 
         ctx.fillText(text, cx, 150); 
         ctx.textAlign = 'left';
@@ -1869,9 +1875,8 @@ function safeGameLoop(time) {
 }
 
 function gameLoop(time) {
-    // 【核心新增】：剧情触发时彻底冻结游戏逻辑
     if (isGamePaused) {
-        lastTime = time; // 记录时间戳，防止解除暂停时人物大瞬移
+        lastTime = time; 
         requestAnimationFrame(safeGameLoop);
         return; 
     }
@@ -1933,7 +1938,6 @@ function gameLoop(time) {
     if (gameState === 'playing') {
         if (tutorialPhase === 'kill_2_zombies' && kills >= 2) { 
             tutorialPhase = 'fix_tower1'; 
-            // 【触发弹窗】
             showDialog("发现可修复的防御塔，搜集4个材料来修复它吧，它能帮助击杀丧尸。");
         }
         if (tutorialPhase === 'fix_tower1' && tower.state === 'active') {
@@ -2194,7 +2198,6 @@ function gameLoop(time) {
             ctx.fill(); 
             ctx.shadowBlur = 0; 
             ctx.fillStyle = 'black'; 
-            // 【自适应修复】
             ctx.font = 'bold 36px sans-serif'; 
             ctx.fillText("🔫手枪", gx - 30, gy - 30); 
         } 
@@ -2377,7 +2380,6 @@ function gameLoop(time) {
             continue; 
         }
         ctx.globalAlpha = Math.max(0, dtObj.life / dtObj.maxLife); 
-        // 【自适应修复】
         ctx.font = 'bold 45px sans-serif'; 
         ctx.fillStyle = dtObj.fillColor; 
         let drawX = dtObj.x - player.x + cx; 
@@ -2440,7 +2442,6 @@ function gameLoop(time) {
             ctx.stroke();
             ctx.shadowBlur = 0; 
             ctx.fillStyle = 'white'; 
-            // 【自适应修复】
             ctx.font = 'bold 40px sans-serif'; 
             ctx.textAlign = 'center'; 
             ctx.textBaseline = 'middle'; 
@@ -2477,7 +2478,6 @@ function gameLoop(time) {
                 drawArrowTo(nearest.x, nearest.y, `探索收集建材 (${totalResourcesCollected}/4)`, cx, cy, time); 
             } else { 
                 ctx.fillStyle = '#00ffcc'; 
-                // 【自适应修复】
                 ctx.font = 'bold 48px sans-serif'; 
                 ctx.textAlign = 'center'; 
                 ctx.fillText(`正在扫描建材... (${totalResourcesCollected}/4)`, cx, 150); 
@@ -2521,7 +2521,6 @@ function gameLoop(time) {
         ctx.textAlign = 'center';
         
         ctx.fillStyle = '#ffff00'; 
-        // 【自适应修复】
         ctx.font = 'bold 100px sans-serif'; 
         ctx.fillText("获得武器: 废土手枪", cx, cy - 200);
         
@@ -2529,12 +2528,10 @@ function gameLoop(time) {
         ctx.globalAlpha = alpha;
         
         ctx.fillStyle = '#00ffcc'; 
-        // 【自适应修复】
         ctx.font = 'bold 70px sans-serif'; 
         ctx.fillText("👇 长按任意位置拖动走位 👇", cx, cy + 150);
         
         ctx.fillStyle = 'white'; 
-        // 【自适应修复】
         ctx.font = 'bold 45px sans-serif'; 
         ctx.fillText("射程极短，走位清剿丧尸！", cx, cy + 230);
         
@@ -2542,7 +2539,6 @@ function gameLoop(time) {
         ctx.textAlign = 'left';
     }
     
-    // 把控制权交还给防崩溃包装器
     requestAnimationFrame(safeGameLoop);
 }
 
@@ -2554,8 +2550,8 @@ function resizeUI() {
 window.addEventListener('resize', resizeUI); 
 resizeUI();
 
+let loadedAssets = 0;
 let totalAssets = Object.keys(assetPaths).length; 
-let loadedAssets = 0; 
 let isGameStarted = false; 
 
 function checkLoadComplete(key, img) {
