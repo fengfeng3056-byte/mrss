@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>丧尸割草 Demo - 完整剧情对话版</title>
+    <title>丧尸割草 Demo - 剧情暂停版</title>
     <style>
         :root { --ui-scale: 1; }
         body, html { 
@@ -47,18 +47,24 @@
             text-align: center; width: 90%; line-height: 1.4; 
         }
 
-        /* ============== 剧情对话框样式 ============== */
+        /* ============== 完美优化的剧情对话框 ============== */
         #dialog-overlay {
             position: absolute; 
-            bottom: 8%; 
-            left: 50%; 
-            transform: translateX(-50%);
-            width: 90%; 
-            height: 16em; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            background: rgba(0, 0, 0, 0.65); /* 全屏变暗 */
             z-index: 2000; 
             opacity: 0; 
             pointer-events: none; 
             transition: opacity 0.3s;
+            display: flex;
+            justify-content: center;
+        }
+        #dialog-box {
+            position: absolute;
+            bottom: 25%; /* 整体往上移，防止挡住摇杆 */
+            width: 90%; 
+            height: 16em; /* 对话框高度 */
         }
         #dialog-bg-img {
             position: absolute; 
@@ -75,29 +81,29 @@
             bottom: 0; 
             left: -1em; 
             width: 16em; 
-            height: 22em; 
+            height: 22em; /* 立绘突破上边框形成立体感 */
             object-fit: contain; 
             z-index: 2;
         }
         #dialog-text {
             position: absolute; 
-            top: 2.5em; 
-            left: 14em; 
-            right: 2em; 
+            top: 2em; 
+            left: 8em; /* 留出左边立绘空间 (基于内部字体2em，8em等于主级的16em) */
+            right: 1em; 
             bottom: 2em; 
             z-index: 3;
             color: white; 
-            font-size: 1.4em; 
+            font-size: 2em; /* 字体大小精准设为20 */
             text-align: left; 
-            white-space: normal; 
+            white-space: normal; /* 开启自动换行 */
             line-height: 1.6; 
             text-shadow: 0.1em 0.1em 0.2em black;
         }
         #dialog-tip {
             position: absolute; 
             bottom: 1em; right: 1.5em; 
-            z-index: 3; color: #00ffcc; font-size: 1.2em; 
-            animation: blink 1s infinite; cursor: pointer;
+            z-index: 3; color: #00ffcc; font-size: 1.4em; 
+            animation: blink 1s infinite;
         }
         @keyframes blink { 50% { opacity: 0.2; } }
         /* ============================================== */
@@ -173,10 +179,12 @@
         <div id="center-alert"></div>
         
         <div id="dialog-overlay" onclick="hideDialog()">
-            <img id="dialog-bg-img" src="./dialog_bg.png" onerror="this.style.display='none'">
-            <img id="dialog-avatar-img" src="./dialog_avatar.png" onerror="this.style.display='none'; document.getElementById('dialog-text').style.left='2em';">
-            <div id="dialog-text"></div>
-            <div id="dialog-tip">点击继续 ▼</div>
+            <div id="dialog-box">
+                <img id="dialog-bg-img" src="./dialog_bg.png" onerror="this.style.display='none'">
+                <img id="dialog-avatar-img" src="./dialog_avatar.png" onerror="this.style.display='none'; document.getElementById('dialog-text').style.left='1em';">
+                <div id="dialog-text"></div>
+                <div id="dialog-tip">点击任意位置继续</div>
+            </div>
         </div>
         
         <div id="hud-top">
@@ -362,8 +370,13 @@ const fctx = fogCanvas.getContext('2d');
 const FOG_TILE_SIZE = 100; 
 const fogSet = new Set();  
 
+// ======= 核心状态控制 =======
 let gameState = 'intro'; 
+let isGamePaused = false; // 全局暂停状态
+
 let alertHideTime = 0; 
+let alertTimeLeft = 0; // 暂停时保留提示剩余时间
+
 let tutorialPhase = 'get_gun'; 
 let totalResourcesCollected = 0; 
 let siegeStarted = false; 
@@ -423,7 +436,7 @@ const joystick = {
     maxRadius: 120 
 };
 
-// ======= UI 控制函数 =======
+// ======= UI 弹窗与控制 =======
 function showCenterAlert(text, color, durationMs) {
     let alertDiv = document.getElementById('center-alert');
     if(alertDiv) {
@@ -435,23 +448,29 @@ function showCenterAlert(text, color, durationMs) {
     }
 }
 
-let dialogTimeout;
 function showDialog(text) {
     let el = document.getElementById('dialog-overlay');
     document.getElementById('dialog-text').innerText = text;
     el.style.opacity = '1';
-    el.style.pointerEvents = 'auto'; // 允许点击
+    el.style.pointerEvents = 'auto'; // 允许点击事件穿过蒙层
     
-    clearTimeout(dialogTimeout);
-    // 8秒后自动关闭
-    dialogTimeout = setTimeout(hideDialog, 8000);
+    // 强制游戏暂停并保留 Alert 时间
+    isGamePaused = true;
+    alertTimeLeft = Math.max(0, alertHideTime - performance.now());
+    joystick.active = false;
 }
 
 function hideDialog() {
     let el = document.getElementById('dialog-overlay');
     el.style.opacity = '0';
-    el.style.pointerEvents = 'none'; // 穿透点击
+    el.style.pointerEvents = 'none'; // 恢复点击穿透
+    
+    // 恢复游戏运行与时间戳防瞬移
+    isGamePaused = false;
+    lastTime = performance.now(); 
+    alertHideTime = performance.now() + alertTimeLeft;
 }
+
 // ==========================
 
 function addDamageText(x, y, text, fillColor, strokeColor) {
@@ -657,7 +676,8 @@ class WallBuilder {
             ctx.fillRect(screenX - 80, screenY + 60, 160 * (this.repairTimer / this.repairTimeMax), 15);
             
             ctx.fillStyle = 'white'; 
-            ctx.font = 'bold 1.6em sans-serif'; 
+            // 【自适应修复】：使用绝对 px 单位，匹配 1080x1920 的自适应缩放机制
+            ctx.font = 'bold 24px sans-serif'; 
             ctx.textAlign='center'; 
             ctx.fillText("建造中...", screenX, screenY + 100); 
             ctx.textAlign='left';
@@ -704,6 +724,7 @@ class Resource {
         this.x = x; 
         this.y = y; 
         this.type = type; 
+        // 放大0.6倍
         this.size = 96; 
         this.pickupRadius = 80;
     }
@@ -720,6 +741,7 @@ class Resource {
         ctx.save(); 
         
         if (img && img.complete && img.naturalWidth > 0) {
+            // 使用 drop-shadow 模拟实体描边
             let d = 3;
             ctx.filter = `drop-shadow(${d}px 0px 0px #F5DEB3) drop-shadow(-${d}px 0px 0px #F5DEB3) drop-shadow(0px ${d}px 0px #F5DEB3) drop-shadow(0px -${d}px 0px #F5DEB3)`;
             ctx.drawImage(img, screenX - this.size/2, screenY - this.size/2, this.size, this.size);
@@ -759,6 +781,7 @@ class WallSegment {
         let renderScale = (img && img.naturalHeight > 0) ? (128 / img.naturalHeight) * this.scale : this.scale;
         let collider = COLLIDER_CACHE[imgKey];
         
+        // 1.35 防漏风膨胀系数
         let wallSealMultiplier = 1.35; 
         this.colRadius = collider ? (collider.radius * renderScale * wallSealMultiplier) : 32 * this.scale * wallSealMultiplier;
         this.colOffsetY = 50 * this.scale + (collider ? collider.offsetY * renderScale : -10 * this.scale);
@@ -1065,7 +1088,8 @@ class Tower {
             ctx.fillStyle = '#00ffcc'; 
             ctx.fillRect(screenX - 80, screenY + 60, 160 * (this.repairTimer/this.repairTimeMax), 15);
             ctx.fillStyle = 'white'; 
-            ctx.font = 'bold 1.6em sans-serif'; 
+            // 【自适应修复】：纯 px 保证完美渲染比例
+            ctx.font = 'bold 24px sans-serif'; 
             ctx.textAlign='center'; 
             ctx.fillText("部署中...", screenX, screenY + 100); 
             ctx.textAlign='left';
@@ -1162,7 +1186,7 @@ class NPC {
         }
         if (this.state === 'run') { 
             ctx.fillStyle = 'white'; 
-            ctx.font = '2em sans-serif'; 
+            ctx.font = 'bold 30px sans-serif'; // 【自适应修复】
             ctx.fillText("救命!", screenX - 25, screenY - 50); 
         }
     }
@@ -1550,6 +1574,36 @@ class Bullet {
     }
 }
 
+/** ==========================================
+ * 这次补上了箭头绘制辅助函数！
+ * ========================================== */
+function drawArrowTo(targetX, targetY, text, cx, cy, time) {
+    let angle = Math.atan2(targetY - player.y, targetX - player.x); 
+    let dist = Math.hypot(targetX - player.x, targetY - player.y);
+    
+    if (dist > 250) {
+        ctx.save(); 
+        ctx.translate(cx, cy); 
+        ctx.rotate(angle); 
+        let arrowScale = 1 + 0.1 * Math.sin(time / 150); 
+        ctx.scale(arrowScale, arrowScale);
+        
+        ctx.fillStyle = 'rgba(0, 255, 200, 0.8)'; 
+        ctx.beginPath(); 
+        ctx.moveTo(180, -15); 
+        ctx.lineTo(180, 15); 
+        ctx.lineTo(220, 0); 
+        ctx.fill(); 
+        ctx.restore(); 
+        
+        ctx.fillStyle = '#00ffcc'; 
+        ctx.font = 'bold 48px sans-serif'; // 【自适应修复】
+        ctx.textAlign = 'center'; 
+        ctx.fillText(text, cx, 150); 
+        ctx.textAlign = 'left';
+    }
+}
+
 function getMappedPos(e) { 
     const touch = e.touches ? e.touches[0] : e; 
     const rect = canvas.getBoundingClientRect(); 
@@ -1750,37 +1804,7 @@ function generateScene() {
 }
 
 /** ==========================================
- * 这次绝不会再漏掉的辅助渲染函数！！！
- * ========================================== */
-function drawArrowTo(targetX, targetY, text, cx, cy, time) {
-    let angle = Math.atan2(targetY - player.y, targetX - player.x); 
-    let dist = Math.hypot(targetX - player.x, targetY - player.y);
-    
-    if (dist > 250) {
-        ctx.save(); 
-        ctx.translate(cx, cy); 
-        ctx.rotate(angle); 
-        let arrowScale = 1 + 0.1 * Math.sin(time / 150); 
-        ctx.scale(arrowScale, arrowScale);
-        
-        ctx.fillStyle = 'rgba(0, 255, 200, 0.8)'; 
-        ctx.beginPath(); 
-        ctx.moveTo(180, -15); 
-        ctx.lineTo(180, 15); 
-        ctx.lineTo(220, 0); 
-        ctx.fill(); 
-        ctx.restore(); 
-        
-        ctx.fillStyle = '#00ffcc'; 
-        ctx.font = 'bold 3.6em sans-serif'; 
-        ctx.textAlign = 'center'; 
-        ctx.fillText(text, cx, 150); 
-        ctx.textAlign = 'left';
-    }
-}
-
-/** ==========================================
- * 初始化与核心逻辑循环
+ * 初始化与防崩溃循环
  * ========================================== */
 let lastTime = performance.now(); 
 let activeTowerToRepair = null;
@@ -1831,7 +1855,6 @@ function initGame() {
     }
 }
 
-// 防崩溃包装器
 function safeGameLoop(time) {
     try {
         gameLoop(time);
@@ -1846,6 +1869,13 @@ function safeGameLoop(time) {
 }
 
 function gameLoop(time) {
+    // 【核心新增】：剧情触发时彻底冻结游戏逻辑
+    if (isGamePaused) {
+        lastTime = time; // 记录时间戳，防止解除暂停时人物大瞬移
+        requestAnimationFrame(safeGameLoop);
+        return; 
+    }
+
     let dt = time - lastTime; 
     lastTime = time; 
     let targets = [player];
@@ -1901,9 +1931,9 @@ function gameLoop(time) {
     }
 
     if (gameState === 'playing') {
-        // 【剧情弹窗触发】：击杀2只丧尸，触发弹窗并进入下一个阶段
         if (tutorialPhase === 'kill_2_zombies' && kills >= 2) { 
             tutorialPhase = 'fix_tower1'; 
+            // 【触发弹窗】
             showDialog("发现可修复的防御塔，搜集4个材料来修复它吧，它能帮助击杀丧尸。");
         }
         if (tutorialPhase === 'fix_tower1' && tower.state === 'active') {
@@ -2164,7 +2194,8 @@ function gameLoop(time) {
             ctx.fill(); 
             ctx.shadowBlur = 0; 
             ctx.fillStyle = 'black'; 
-            ctx.font = 'bold 2.4em sans-serif'; 
+            // 【自适应修复】
+            ctx.font = 'bold 36px sans-serif'; 
             ctx.fillText("🔫手枪", gx - 30, gy - 30); 
         } 
     }
@@ -2346,7 +2377,8 @@ function gameLoop(time) {
             continue; 
         }
         ctx.globalAlpha = Math.max(0, dtObj.life / dtObj.maxLife); 
-        ctx.font = 'bold 3.6em sans-serif'; 
+        // 【自适应修复】
+        ctx.font = 'bold 45px sans-serif'; 
         ctx.fillStyle = dtObj.fillColor; 
         let drawX = dtObj.x - player.x + cx; 
         let drawY = dtObj.y - player.y + cy - ((dtObj.maxLife - dtObj.life) / 2000) * 40; 
@@ -2408,7 +2440,8 @@ function gameLoop(time) {
             ctx.stroke();
             ctx.shadowBlur = 0; 
             ctx.fillStyle = 'white'; 
-            ctx.font = 'bold 2.8em sans-serif'; 
+            // 【自适应修复】
+            ctx.font = 'bold 40px sans-serif'; 
             ctx.textAlign = 'center'; 
             ctx.textBaseline = 'middle'; 
             ctx.fillText(btnText, 0, 0); 
@@ -2441,10 +2474,11 @@ function gameLoop(time) {
                     let d2 = Math.hypot(player.x - resources[i].x, player.y - resources[i].y);
                     if (d2 < d1) nearest = resources[i];
                 }
-                drawArrowTo(nearest.x, nearest.y, `雷达: 收集建材 (${totalResourcesCollected}/4)`, cx, cy, time); 
+                drawArrowTo(nearest.x, nearest.y, `探索收集建材 (${totalResourcesCollected}/4)`, cx, cy, time); 
             } else { 
                 ctx.fillStyle = '#00ffcc'; 
-                ctx.font = 'bold 3.6em sans-serif'; 
+                // 【自适应修复】
+                ctx.font = 'bold 48px sans-serif'; 
                 ctx.textAlign = 'center'; 
                 ctx.fillText(`正在扫描建材... (${totalResourcesCollected}/4)`, cx, 150); 
                 ctx.textAlign = 'left'; 
@@ -2461,11 +2495,11 @@ function gameLoop(time) {
                     let d2 = Math.hypot(player.x - resources[i].x, player.y - resources[i].y);
                     if (d2 < d1) nearest = resources[i];
                 }
-                drawArrowTo(nearest.x, nearest.y, `雷达: 收集建材建墙 (${totalResourcesCollected}/7)`, cx, cy, time); 
+                drawArrowTo(nearest.x, nearest.y, `收集建材建墙 (${totalResourcesCollected}/7)`, cx, cy, time); 
             } 
         } 
         else if (tutorialPhase === 'build_walls' && wallBuilder && wallBuilder.state === 'broken') { 
-            drawArrowTo(wallBuilder.x, wallBuilder.y, "前往 1号塔旁 部署要塞围墙！", cx, cy, time); 
+            drawArrowTo(wallBuilder.x, wallBuilder.y, "前往塔旁部署围墙！", cx, cy, time); 
         }
     }
 
@@ -2487,24 +2521,28 @@ function gameLoop(time) {
         ctx.textAlign = 'center';
         
         ctx.fillStyle = '#ffff00'; 
-        ctx.font = 'bold 8em sans-serif'; 
+        // 【自适应修复】
+        ctx.font = 'bold 100px sans-serif'; 
         ctx.fillText("获得武器: 废土手枪", cx, cy - 200);
         
         let alpha = 0.5 + 0.5 * Math.sin(time / 200); 
         ctx.globalAlpha = alpha;
         
         ctx.fillStyle = '#00ffcc'; 
-        ctx.font = 'bold 5.5em sans-serif'; 
+        // 【自适应修复】
+        ctx.font = 'bold 70px sans-serif'; 
         ctx.fillText("👇 长按任意位置拖动走位 👇", cx, cy + 150);
         
         ctx.fillStyle = 'white'; 
-        ctx.font = 'bold 3.6em sans-serif'; 
-        ctx.fillText("射程极短，走位清剿周围丧尸！", cx, cy + 230);
+        // 【自适应修复】
+        ctx.font = 'bold 45px sans-serif'; 
+        ctx.fillText("射程极短，走位清剿丧尸！", cx, cy + 230);
         
         ctx.globalAlpha = 1.0; 
         ctx.textAlign = 'left';
     }
     
+    // 把控制权交还给防崩溃包装器
     requestAnimationFrame(safeGameLoop);
 }
 
